@@ -123,7 +123,7 @@ npx gomamayo ごまマヨネーズ --neologd false  # neologd辞書なし（省�
 
 ## 貢献者
 
-[![Contributors](https://contrib.rocks/image?repo=otoneko1102/gomamayo.js)](https://github.com/otoneko1102/gomamayo.js/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=otoneko1102/gomamayo.js)](https://github.com/otnc/gomamayo.js/graphs/contributors)
 
 ## 参考
 
