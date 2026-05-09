@@ -9,7 +9,7 @@ const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 
 const DICT_URL =
-  "https://github.com/otoneko1102/gomamayo.js/releases/download/dict/dict.zip";
+  "https://github.com/otnc/gomamayo.js/releases/download/dict/dict.zip";
 const outputPath = path.resolve(rootDir, "lib");
 const fetchFn = globalThis.fetch?.bind(globalThis);
 
