@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { ReadingDict } from "./reading-dict.js";
+import { hiraToKata, normalize, divideMora, prolongedToVowel } from "./kana.js";
 
 // tsupのshims設定により、import.meta.url はCJSビルドでも利用できる
 const requireFn = createRequire(import.meta.url);
@@ -57,140 +58,9 @@ export interface GomamayoResult {
   reading: string;
 }
 
-const VOWEL_MAP: Record<string, string> = {
-  ア: "ア",
-  イ: "イ",
-  ウ: "ウ",
-  エ: "エ",
-  オ: "オ",
-  カ: "ア",
-  キ: "イ",
-  ク: "ウ",
-  ケ: "エ",
-  コ: "オ",
-  サ: "ア",
-  シ: "イ",
-  ス: "ウ",
-  セ: "エ",
-  ソ: "オ",
-  タ: "ア",
-  チ: "イ",
-  ツ: "ウ",
-  テ: "エ",
-  ト: "オ",
-  ナ: "ア",
-  ニ: "イ",
-  ヌ: "ウ",
-  ネ: "エ",
-  ノ: "オ",
-  ハ: "ア",
-  ヒ: "イ",
-  フ: "ウ",
-  ヘ: "エ",
-  ホ: "オ",
-  マ: "ア",
-  ミ: "イ",
-  ム: "ウ",
-  メ: "エ",
-  モ: "オ",
-  ヤ: "ア",
-  ユ: "ウ",
-  ヨ: "オ",
-  ラ: "ア",
-  リ: "イ",
-  ル: "ウ",
-  レ: "エ",
-  ロ: "オ",
-  ワ: "ア",
-  ヲ: "オ",
-  ン: "ン",
-  ガ: "ア",
-  ギ: "イ",
-  グ: "ウ",
-  ゲ: "エ",
-  ゴ: "オ",
-  ザ: "ア",
-  ジ: "イ",
-  ズ: "ウ",
-  ゼ: "エ",
-  ゾ: "オ",
-  ダ: "ア",
-  ヂ: "イ",
-  ヅ: "ウ",
-  デ: "エ",
-  ド: "オ",
-  バ: "ア",
-  ビ: "イ",
-  ブ: "ウ",
-  ベ: "エ",
-  ボ: "オ",
-  パ: "ア",
-  ピ: "イ",
-  プ: "ウ",
-  ペ: "エ",
-  ポ: "オ",
-  ァ: "ア",
-  ィ: "イ",
-  ゥ: "ウ",
-  ェ: "エ",
-  ォ: "オ",
-  ャ: "ア",
-  ュ: "ウ",
-  ョ: "オ",
-  ッ: "ッ",
-  ヴ: "ウ",
-};
-
-const MORA_PATTERN =
-  /[ウクスツヌフムユルグズヅブプヴ][ァィェォ]|[イキシチニヒミリギジヂビピ][ャュェョ]|[テデ][ィュ]|[ァ-ヴー]/g;
-
-function divideMora(str: string): string[] {
-  return str.match(MORA_PATTERN) ?? [];
-}
-
-function hiraToKata(str: string): string {
-  return str.replace(/[ぁ-ゖ]/g, (c) =>
-    String.fromCharCode(c.charCodeAt(0) + 0x60),
-  );
-}
-
-function prolongedToVowel(str: string): string {
-  const moras = divideMora(str);
-  if (moras.length === 0) return str;
-  const first = moras[0];
-  if (!first) return str;
-
-  const result: string[] = [first];
-  for (let i = 1; i < moras.length; i++) {
-    const current = moras[i];
-    if (!current) continue;
-    if (current === "ー") {
-      const prevMora = moras[i - 1];
-      if (prevMora) {
-        const lastChar = prevMora[prevMora.length - 1];
-        result.push(lastChar ? (VOWEL_MAP[lastChar] ?? lastChar) : current);
-      } else {
-        result.push(current);
-      }
-    } else {
-      result.push(current);
-    }
-  }
-  return result.join("");
-}
-
 function getReading(token: IpadicFeatures): string {
   const reading = token.reading ?? token.surface_form;
   return hiraToKata(reading);
-}
-
-function normalize(str: string): string {
-  return str
-    .normalize("NFKC")
-    .replace(/\s+/g, "")
-    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) =>
-      String.fromCharCode(c.charCodeAt(0) - 0xfee0),
-    );
 }
 
 let ipadicTokenizer: Promise<Tokenizer<IpadicFeatures>> | null = null;

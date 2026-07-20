@@ -16,6 +16,7 @@ import zlib from "zlib";
 import readline from "readline";
 import AdmZip from "adm-zip";
 import consola from "consola";
+import wanakana from "wanakana";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -43,20 +44,13 @@ async function resolveVersion() {
 const MAX_SURFACE_LENGTH = 64;
 const KATAKANA_READING = /^[ァ-ヶー]+$/;
 
-// src/index.ts の normalize() と同一の正規化
+// 注: src/kana.ts の normalize() / hiraToKata() と同一に保つこと
 function normalize(str) {
-  return str
-    .normalize("NFKC")
-    .replace(/\s+/g, "")
-    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) =>
-      String.fromCharCode(c.charCodeAt(0) - 0xfee0),
-    );
+  return str.normalize("NFKC").replace(/\s+/g, "");
 }
 
 function hiraToKata(str) {
-  return str.replace(/[ぁ-ゖ]/g, (c) =>
-    String.fromCharCode(c.charCodeAt(0) + 0x60),
-  );
+  return wanakana.toKatakana(str, { passRomaji: true });
 }
 
 async function download(fileUrl, dest) {
