@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 // src/cli.ts
+import fs3 from "fs";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
@@ -253,6 +254,55 @@ function getReadingDict() {
   }
   return readingDict;
 }
+var KANA_READING = /^[ァ-ヴー]+$/;
+function toUserDictMap(words) {
+  const map = /* @__PURE__ */ new Map();
+  for (const [rawSurface, rawReading] of Object.entries(words)) {
+    const surface = normalize(rawSurface);
+    const reading = hiraToKata(normalize(rawReading));
+    if (surface.length === 0) {
+      throw new Error(`\u30E6\u30FC\u30B6\u30FC\u8F9E\u66F8\u306E\u8868\u8A18\u304C\u7A7A\u3067\u3059: "${rawSurface}"`);
+    }
+    if (!KANA_READING.test(reading)) {
+      throw new Error(
+        `\u30E6\u30FC\u30B6\u30FC\u8F9E\u66F8\u306E\u8AAD\u307F\u306F\u304B\u306A\u8868\u8A18\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: "${rawSurface}" -> "${rawReading}"`
+      );
+    }
+    map.set(surface, reading);
+  }
+  return map;
+}
+function mapToDictSource(map) {
+  let maxLen = 0;
+  for (const surface of map.keys()) {
+    if (surface.length > maxLen) maxLen = surface.length;
+  }
+  return {
+    maxSurfaceLength: maxLen,
+    lookup: (surface) => map.get(surface) ?? null
+  };
+}
+var globalUserDict = /* @__PURE__ */ new Map();
+function addUserWords(words) {
+  for (const [surface, reading] of toUserDictMap(words)) {
+    globalUserDict.set(surface, reading);
+  }
+}
+function composeDictSources(sources) {
+  const active = sources.filter((s) => s.maxSurfaceLength > 0);
+  if (active.length === 0) return null;
+  if (active.length === 1) return active[0];
+  return {
+    maxSurfaceLength: Math.max(...active.map((s) => s.maxSurfaceLength)),
+    lookup: (surface) => {
+      for (const source of active) {
+        const reading = source.lookup(surface);
+        if (reading) return reading;
+      }
+      return null;
+    }
+  };
+}
 function findMaxDegree(formerMora, laterMora) {
   const maxCheck = Math.min(formerMora.length, laterMora.length);
   let maxDegree = 0;
@@ -292,7 +342,7 @@ function findInternalGomamayo(moras, higher) {
   }
   return results;
 }
-function applyReadingDict(tokens, text, dict) {
+function applyReadingDict(tokens, text, dict, override) {
   const starts = [];
   let acc = 0;
   for (const token of tokens) {
@@ -321,7 +371,7 @@ function applyReadingDict(tokens, text, dict) {
     }
     if (merged) continue;
     const token = tokens[i];
-    let reading = token.reading;
+    let reading = override?.lookup(token.surface_form) ?? token.reading;
     if (!reading) {
       reading = dict.lookup(token.surface_form) ?? token.surface_form;
     }
@@ -338,10 +388,21 @@ async function analyze(input, options = {}) {
   const { higher = true, multi = true } = options;
   const useDict = options.useDict ?? options.useNeologd ?? true;
   const tokenizer = await getIpadicTokenizer();
-  const dict = useDict ? getReadingDict() : null;
+  const userSources = [];
+  if (options.userDict) {
+    userSources.push(mapToDictSource(toUserDictMap(options.userDict)));
+  }
+  if (globalUserDict.size > 0) {
+    userSources.push(mapToDictSource(globalUserDict));
+  }
+  const override = composeDictSources(userSources);
+  const dict = composeDictSources([
+    ...userSources,
+    ...useDict ? [getReadingDict()] : []
+  ]);
   const normalized = normalize(input);
   const tokens = tokenizer.tokenize(normalized);
-  const tokenInfos = dict ? applyReadingDict(tokens, normalized, dict) : tokens.map((token) => ({
+  const tokenInfos = dict ? applyReadingDict(tokens, normalized, dict, override) : tokens.map((token) => ({
     surface: token.surface_form,
     reading: getReading(token),
     merged: false
@@ -425,11 +486,15 @@ var argv = yargs(hideBin(process.argv)).scriptName("gomamayo").usage("$0 <text>"
   describe: "\u56FA\u6709\u540D\u8A5E\u306E\u8AAD\u307F\u8F9E\u66F8\u3092\u4F7F\u7528\u3059\u308B\u304B (\u30E1\u30E2\u30EA\u7BC0\u7D04\u306E\u305F\u3081false\u306B\u3067\u304D\u308B)",
   type: "boolean",
   default: true
+}).option("user-dict", {
+  alias: "u",
+  describe: "\u30E6\u30FC\u30B6\u30FC\u8F9E\u66F8TSV\u306E\u30D1\u30B9 (1\u884C\u306B\u3064\u304D \u8868\u8A18<TAB>\u8AAD\u307F\u3001#\u306F\u30B3\u30E1\u30F3\u30C8)",
+  type: "string"
 }).option("neologd", {
   describe: "[\u975E\u63A8\u5968] --dict \u306Ev1\u4E92\u63DB\u30A8\u30A4\u30EA\u30A2\u30B9",
   type: "boolean",
   hidden: true
-}).example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA", "\u57FA\u672C\u7684\u306A\u4F7F\u7528\u65B9\u6CD5").example("$0 \u30AA\u30EC\u30F3\u30B8\u30EC\u30F3\u30B8 --higher true", "\u9AD8\u6B21\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u3042\u308A").example("$0 \u592A\u9F13\u516C\u52DF\u52DF\u96C6\u7D42\u4E86 --multi true", "\u591A\u9805\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u3042\u308A").example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA --higher false", "\u9AD8\u6B21\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u306A\u3057").example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA --dict false", "\u8AAD\u307F\u8F9E\u66F8\u306A\u3057(\u7701\u30E1\u30E2\u30EA)").help().alias("help", "?").version().alias("version", "v").parseSync();
+}).example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA", "\u57FA\u672C\u7684\u306A\u4F7F\u7528\u65B9\u6CD5").example("$0 \u30AA\u30EC\u30F3\u30B8\u30EC\u30F3\u30B8 --higher true", "\u9AD8\u6B21\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u3042\u308A").example("$0 \u592A\u9F13\u516C\u52DF\u52DF\u96C6\u7D42\u4E86 --multi true", "\u591A\u9805\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u3042\u308A").example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA --higher false", "\u9AD8\u6B21\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u306A\u3057").example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA --dict false", "\u8AAD\u307F\u8F9E\u66F8\u306A\u3057(\u7701\u30E1\u30E2\u30EA)").example("$0 \u8D85\u4F1A\u5834\u796D --user-dict mydict.tsv", "\u30E6\u30FC\u30B6\u30FC\u8F9E\u66F8\u3092\u8FFD\u52A0").help().alias("help", "?").version().alias("version", "v").parseSync();
 (async function() {
   const inputText = argv.text;
   const options = {
@@ -443,6 +508,9 @@ var argv = yargs(hideBin(process.argv)).scriptName("gomamayo").usage("$0 <text>"
   );
   console.log("");
   try {
+    if (argv.userDict) {
+      addUserWords(parseUserDictFile(argv.userDict));
+    }
     const result = await analyze(inputText, options);
     printResult(result);
   } catch (error) {
@@ -451,6 +519,20 @@ var argv = yargs(hideBin(process.argv)).scriptName("gomamayo").usage("$0 <text>"
     process.exit(1);
   }
 })();
+function parseUserDictFile(filePath) {
+  const words = {};
+  const lines = fs3.readFileSync(filePath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const [surface, reading] = trimmed.split("	");
+    if (!surface || !reading) {
+      throw new Error(`\u30E6\u30FC\u30B6\u30FC\u8F9E\u66F8\u306E\u5F62\u5F0F\u304C\u4E0D\u6B63\u3067\u3059: "${line}"`);
+    }
+    words[surface] = reading;
+  }
+  return words;
+}
 function printResult(result) {
   console.log("=== \u89E3\u6790\u7D50\u679C ===");
   console.log(`\u30B4\u30DE\u30DE\u30E8: ${result.isGomamayo ? "\u691C\u51FA" : "\u672A\u691C\u51FA"}`);

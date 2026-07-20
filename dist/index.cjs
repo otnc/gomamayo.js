@@ -30,11 +30,14 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/index.ts
 var src_exports = {};
 __export(src_exports, {
+  addUserWords: () => addUserWords,
   analyze: () => analyze,
   clearTokenizerCache: () => clearTokenizerCache,
+  clearUserWords: () => clearUserWords,
   default: () => src_default,
   find: () => find,
-  isGomamayo: () => isGomamayo
+  isGomamayo: () => isGomamayo,
+  removeUserWords: () => removeUserWords
 });
 module.exports = __toCommonJS(src_exports);
 
@@ -291,6 +294,63 @@ function getReadingDict() {
   }
   return readingDict;
 }
+var KANA_READING = /^[ァ-ヴー]+$/;
+function toUserDictMap(words) {
+  const map = /* @__PURE__ */ new Map();
+  for (const [rawSurface, rawReading] of Object.entries(words)) {
+    const surface = normalize(rawSurface);
+    const reading = hiraToKata(normalize(rawReading));
+    if (surface.length === 0) {
+      throw new Error(`\u30E6\u30FC\u30B6\u30FC\u8F9E\u66F8\u306E\u8868\u8A18\u304C\u7A7A\u3067\u3059: "${rawSurface}"`);
+    }
+    if (!KANA_READING.test(reading)) {
+      throw new Error(
+        `\u30E6\u30FC\u30B6\u30FC\u8F9E\u66F8\u306E\u8AAD\u307F\u306F\u304B\u306A\u8868\u8A18\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: "${rawSurface}" -> "${rawReading}"`
+      );
+    }
+    map.set(surface, reading);
+  }
+  return map;
+}
+function mapToDictSource(map) {
+  let maxLen = 0;
+  for (const surface of map.keys()) {
+    if (surface.length > maxLen) maxLen = surface.length;
+  }
+  return {
+    maxSurfaceLength: maxLen,
+    lookup: (surface) => map.get(surface) ?? null
+  };
+}
+var globalUserDict = /* @__PURE__ */ new Map();
+function addUserWords(words) {
+  for (const [surface, reading] of toUserDictMap(words)) {
+    globalUserDict.set(surface, reading);
+  }
+}
+function removeUserWords(surfaces) {
+  for (const surface of surfaces) {
+    globalUserDict.delete(normalize(surface));
+  }
+}
+function clearUserWords() {
+  globalUserDict.clear();
+}
+function composeDictSources(sources) {
+  const active = sources.filter((s) => s.maxSurfaceLength > 0);
+  if (active.length === 0) return null;
+  if (active.length === 1) return active[0];
+  return {
+    maxSurfaceLength: Math.max(...active.map((s) => s.maxSurfaceLength)),
+    lookup: (surface) => {
+      for (const source of active) {
+        const reading = source.lookup(surface);
+        if (reading) return reading;
+      }
+      return null;
+    }
+  };
+}
 function clearTokenizerCache(type = "all") {
   if (type === "ipadic" || type === "all") {
     ipadicTokenizer = null;
@@ -342,7 +402,7 @@ function findInternalGomamayo(moras, higher) {
   }
   return results;
 }
-function applyReadingDict(tokens, text, dict) {
+function applyReadingDict(tokens, text, dict, override) {
   const starts = [];
   let acc = 0;
   for (const token of tokens) {
@@ -371,7 +431,7 @@ function applyReadingDict(tokens, text, dict) {
     }
     if (merged) continue;
     const token = tokens[i];
-    let reading = token.reading;
+    let reading = override?.lookup(token.surface_form) ?? token.reading;
     if (!reading) {
       reading = dict.lookup(token.surface_form) ?? token.surface_form;
     }
@@ -388,10 +448,21 @@ async function analyze(input, options = {}) {
   const { higher = true, multi = true } = options;
   const useDict = options.useDict ?? options.useNeologd ?? true;
   const tokenizer = await getIpadicTokenizer();
-  const dict = useDict ? getReadingDict() : null;
+  const userSources = [];
+  if (options.userDict) {
+    userSources.push(mapToDictSource(toUserDictMap(options.userDict)));
+  }
+  if (globalUserDict.size > 0) {
+    userSources.push(mapToDictSource(globalUserDict));
+  }
+  const override = composeDictSources(userSources);
+  const dict = composeDictSources([
+    ...userSources,
+    ...useDict ? [getReadingDict()] : []
+  ]);
   const normalized = normalize(input);
   const tokens = tokenizer.tokenize(normalized);
-  const tokenInfos = dict ? applyReadingDict(tokens, normalized, dict) : tokens.map((token) => ({
+  const tokenInfos = dict ? applyReadingDict(tokens, normalized, dict, override) : tokens.map((token) => ({
     surface: token.surface_form,
     reading: getReading(token),
     merged: false
@@ -459,11 +530,22 @@ async function find(input, options = {}) {
   const result = await analyze(input, options);
   return result.isGomamayo ? result.matches : null;
 }
-var src_default = { analyze, isGomamayo, find, clearTokenizerCache };
+var src_default = {
+  analyze,
+  isGomamayo,
+  find,
+  clearTokenizerCache,
+  addUserWords,
+  removeUserWords,
+  clearUserWords
+};
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  addUserWords,
   analyze,
   clearTokenizerCache,
+  clearUserWords,
   find,
-  isGomamayo
+  isGomamayo,
+  removeUserWords
 });

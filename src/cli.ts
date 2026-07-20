@@ -1,13 +1,20 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
-import { analyze, GomamayoOptions, GomamayoResult } from "./index.js";
+import {
+  analyze,
+  addUserWords,
+  GomamayoOptions,
+  GomamayoResult,
+} from "./index.js";
 
 interface Arguments {
   text: string;
   higher: boolean;
   multi: boolean;
   dict: boolean;
+  userDict?: string;
   neologd?: boolean;
 }
 
@@ -38,6 +45,11 @@ const argv = yargs(hideBin(process.argv))
     type: "boolean",
     default: true,
   })
+  .option("user-dict", {
+    alias: "u",
+    describe: "ユーザー辞書TSVのパス (1行につき 表記<TAB>読み、#はコメント)",
+    type: "string",
+  })
   .option("neologd", {
     describe: "[非推奨] --dict のv1互換エイリアス",
     type: "boolean",
@@ -48,6 +60,7 @@ const argv = yargs(hideBin(process.argv))
   .example("$0 太鼓公募募集終了 --multi true", "多項ゴママヨ検出あり")
   .example("$0 ごまマヨネーズ --higher false", "高次ゴママヨ検出なし")
   .example("$0 ごまマヨネーズ --dict false", "読み辞書なし(省メモリ)")
+  .example("$0 超会場祭 --user-dict mydict.tsv", "ユーザー辞書を追加")
   .help()
   .alias("help", "?")
   .version()
@@ -69,6 +82,9 @@ const argv = yargs(hideBin(process.argv))
   console.log("");
 
   try {
+    if (argv.userDict) {
+      addUserWords(parseUserDictFile(argv.userDict));
+    }
     const result = await analyze(inputText, options);
     printResult(result);
   } catch (error) {
@@ -77,6 +93,21 @@ const argv = yargs(hideBin(process.argv))
     process.exit(1);
   }
 })();
+
+function parseUserDictFile(filePath: string): Record<string, string> {
+  const words: Record<string, string> = {};
+  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const [surface, reading] = trimmed.split("\t");
+    if (!surface || !reading) {
+      throw new Error(`ユーザー辞書の形式が不正です: "${line}"`);
+    }
+    words[surface] = reading;
+  }
+  return words;
+}
 
 function printResult(result: GomamayoResult): void {
   console.log("=== 解析結果 ===");

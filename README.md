@@ -6,6 +6,7 @@ MeCab不要のゴママヨ検出ライブラリ
 「博麗霊夢(ハクレイ|レイム)」のような固有名詞のゴママヨも検出できます。
 
 > [!NOTE]
+>   
 > v2.0.0 で辞書構成を刷新しました。
 >
 > - `postinstall` での辞書ダウンロード(約380MB)を廃止し、`npm install` だけで即使えるようになりました
@@ -59,6 +60,31 @@ await analyze('太鼓公募募集終了', { multi: false });
 await analyze('博麗霊夢', { useDict: false });
 ```
 
+### ユーザー辞書
+
+同梱辞書にない固有名詞や造語は、ユーザー辞書で追加できます。
+ユーザー辞書は同梱辞書より優先され、既知の単語の読みの上書きにも使えます。
+
+```javascript
+import { analyze, addUserWords, removeUserWords, clearUserWords } from 'gomamayo';
+
+// プロセス全体に登録 (読みはひらがな/カタカナ)
+addUserWords({ 超会場祭: 'ちょうかいかいさい' });
+await analyze('超会場祭'); // isGomamayo: true (チョウカイ|カイサイ)
+
+removeUserWords(['超会場祭']); // 個別削除
+clearUserWords(); // 全削除
+
+// 1回の呼び出しにだけ適用する場合
+await analyze('超会場祭', { userDict: { 超会場祭: 'ちょうかいかいさい' } });
+```
+
+CLI では TSV ファイル (1行につき `表記<TAB>読み`、`#` で始まる行はコメント) を渡せます。
+
+```bash
+npx gomamayo 超会場祭 --user-dict mydict.tsv
+```
+
 ### メモリ管理
 
 辞書は一度ロードするとキャッシュされ、以降の呼び出しでは再利用されます。
@@ -105,6 +131,10 @@ npx gomamayo ごまマヨネーズ --dict false  # 読み辞書なし（省メ�
 
 ゴママヨの場合は `GomamayoMatch[]` を、そうでなければ `null` を返します。
 
+### `addUserWords(words)` / `removeUserWords(surfaces)` / `clearUserWords()`
+
+ユーザー辞書を操作します。`words` は `{ 表記: 読み }` のオブジェクトで、読みはひらがな/カタカナで指定します。
+
 ### `clearTokenizerCache(type?)`
 
 トークナイザー・辞書のキャッシュをクリアしてメモリを解放します。
@@ -134,6 +164,10 @@ npx gomamayo ごまマヨネーズ --dict false  # 読み辞書なし（省メ�
 - https://github.com/jugesuke/gomamayo
 - https://github.com/ThinaticSystem/gomamayo.js
   - https://www.npmjs.com/package/gomamayo-js
+
+## ライセンス
+
+このパッケージは [MIT License](./LICENSE) で提供されています。
 
 > [!WARNING]
 > このパッケージ自体は MIT License ですが、Apache License 2.0 の依存リソース（[kuromoji.js](https://www.npmjs.com/package/kuromoji) の IPADIC 辞書、および [SudachiDict](https://github.com/WorksApplications/SudachiDict) 由来の読み表データ）を使用しています。これらのライセンス条項も適用されます。

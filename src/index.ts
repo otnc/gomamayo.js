@@ -31,6 +31,12 @@ export interface GomamayoOptions {
   multi?: boolean;
   /** 固有名詞の読み辞書を使用するか (デフォルト: true) */
   useDict?: boolean;
+  /**
+   * この呼び出しでのみ使用するユーザー辞書 (表記→読み)。
+   * 読みはひらがな/カタカナで指定する。`addUserWords` と同様に
+   * 同梱辞書より優先される
+   */
+  userDict?: Record<string, string>;
   /** @deprecated v1互換エイリアス。`useDict` を使用してください */
   useNeologd?: boolean;
 }
@@ -211,6 +217,84 @@ function getReadingDict(): ReadingDict {
   return readingDict;
 }
 
+/** 読みを引ける辞書の共通インターフェース (ReadingDict も構造的に満たす) */
+interface DictSource {
+  maxSurfaceLength: number;
+  lookup(surface: string): string | null;
+}
+
+const KANA_READING = /^[ァ-ヴー]+$/;
+
+function toUserDictMap(words: Record<string, string>): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const [rawSurface, rawReading] of Object.entries(words)) {
+    const surface = normalize(rawSurface);
+    const reading = hiraToKata(normalize(rawReading));
+    if (surface.length === 0) {
+      throw new Error(`ユーザー辞書の表記が空です: "${rawSurface}"`);
+    }
+    if (!KANA_READING.test(reading)) {
+      throw new Error(
+        `ユーザー辞書の読みはかな表記で指定してください: "${rawSurface}" -> "${rawReading}"`,
+      );
+    }
+    map.set(surface, reading);
+  }
+  return map;
+}
+
+function mapToDictSource(map: Map<string, string>): DictSource {
+  let maxLen = 0;
+  for (const surface of map.keys()) {
+    if (surface.length > maxLen) maxLen = surface.length;
+  }
+  return {
+    maxSurfaceLength: maxLen,
+    lookup: (surface) => map.get(surface) ?? null,
+  };
+}
+
+const globalUserDict = new Map<string, string>();
+
+/**
+ * ユーザー辞書に語を追加する (プロセス全体で有効)
+ * @param words 表記→読み(ひらがな/カタカナ) のマップ
+ * @example addUserWords({ 博麗霊夢: "はくれいれいむ" })
+ */
+export function addUserWords(words: Record<string, string>): void {
+  for (const [surface, reading] of toUserDictMap(words)) {
+    globalUserDict.set(surface, reading);
+  }
+}
+
+/** ユーザー辞書から語を削除する */
+export function removeUserWords(surfaces: string[]): void {
+  for (const surface of surfaces) {
+    globalUserDict.delete(normalize(surface));
+  }
+}
+
+/** ユーザー辞書を空にする */
+export function clearUserWords(): void {
+  globalUserDict.clear();
+}
+
+function composeDictSources(sources: DictSource[]): DictSource | null {
+  const active = sources.filter((s) => s.maxSurfaceLength > 0);
+  if (active.length === 0) return null;
+  if (active.length === 1) return active[0]!;
+  return {
+    maxSurfaceLength: Math.max(...active.map((s) => s.maxSurfaceLength)),
+    lookup: (surface) => {
+      for (const source of active) {
+        const reading = source.lookup(surface);
+        if (reading) return reading;
+      }
+      return null;
+    },
+  };
+}
+
 /**
  * トークナイザー・辞書のキャッシュをクリアしてメモリを解放する
  * @param type 'ipadic' | 'dict' | 'all' (デフォルト: 'all')
@@ -294,11 +378,13 @@ interface TokenInfo {
  * - トークン境界に沿って辞書エントリを最長一致で探し、
  *   複数トークンにまたがる固有名詞は辞書の読みを持つ1語に統合する
  * - 読みが取れなかった未知語は、単独トークンでも辞書で読みを補完する
+ * - override (ユーザー辞書) は、IPADICが読みを持つ既知語の読みも上書きする
  */
 function applyReadingDict(
   tokens: IpadicFeatures[],
   text: string,
-  dict: ReadingDict,
+  dict: DictSource,
+  override: DictSource | null,
 ): TokenInfo[] {
   const starts: number[] = [];
   let acc = 0;
@@ -337,7 +423,7 @@ function applyReadingDict(
     if (merged) continue;
 
     const token = tokens[i]!;
-    let reading = token.reading;
+    let reading = override?.lookup(token.surface_form) ?? token.reading;
     if (!reading) {
       reading = dict.lookup(token.surface_form) ?? token.surface_form;
     }
@@ -359,13 +445,26 @@ export async function analyze(
   const useDict = options.useDict ?? options.useNeologd ?? true;
 
   const tokenizer = await getIpadicTokenizer();
-  const dict = useDict ? getReadingDict() : null;
+
+  // ユーザー辞書(呼び出し単位 → グローバル)を同梱辞書より優先して重ねる
+  const userSources: DictSource[] = [];
+  if (options.userDict) {
+    userSources.push(mapToDictSource(toUserDictMap(options.userDict)));
+  }
+  if (globalUserDict.size > 0) {
+    userSources.push(mapToDictSource(globalUserDict));
+  }
+  const override = composeDictSources(userSources);
+  const dict = composeDictSources([
+    ...userSources,
+    ...(useDict ? [getReadingDict()] : []),
+  ]);
 
   const normalized = normalize(input);
   const tokens = tokenizer.tokenize(normalized);
 
   const tokenInfos: TokenInfo[] = dict
-    ? applyReadingDict(tokens, normalized, dict)
+    ? applyReadingDict(tokens, normalized, dict, override)
     : tokens.map((token) => ({
         surface: token.surface_form,
         reading: getReading(token),
@@ -456,4 +555,12 @@ export async function find(
   return result.isGomamayo ? result.matches : null;
 }
 
-export default { analyze, isGomamayo, find, clearTokenizerCache };
+export default {
+  analyze,
+  isGomamayo,
+  find,
+  clearTokenizerCache,
+  addUserWords,
+  removeUserWords,
+  clearUserWords,
+};
