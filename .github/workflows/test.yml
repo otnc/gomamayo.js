@@ -23,6 +23,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check formatting & types
+        run: |
+          npm run format:check
+          npm run typecheck
+
       - name: Build
         run: npm run build
 

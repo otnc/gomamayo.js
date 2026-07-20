@@ -31,8 +31,8 @@
   "scripts": {
     "setup": "npm install && node scripts/setup.js",
     "test": "jest",
-    "format": "prettier --write ./src/ ./scripts/",
-    "format:check": "prettier --check ./src/ ./scripts/",
+    "format": "prettier --write ./src/ ./scripts/ ./test/ ./tsup.config.ts",
+    "format:check": "prettier --check ./src/ ./scripts/ ./test/ ./tsup.config.ts",
     "build": "tsup",
     "build:dict": "node scripts/build-dict.js",
     "typecheck": "tsc --noEmit"
