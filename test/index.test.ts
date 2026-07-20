@@ -4,7 +4,7 @@ import {
   find,
   addUserWords,
   clearUserWords,
-} from "../dist/index.cjs";
+} from "../src/index";
 
 describe("analyze", () => {
   test("ごまマヨネーズ is 1項1次", async () => {

@@ -30,7 +30,6 @@
   },
   "scripts": {
     "setup": "npm install && node scripts/setup.js",
-    "pretest": "npm run build",
     "test": "jest",
     "format": "prettier --write ./src/ ./scripts/ ./test/ ./tsup.config.ts",
     "format:check": "prettier --check ./src/ ./scripts/ ./test/ ./tsup.config.ts",
