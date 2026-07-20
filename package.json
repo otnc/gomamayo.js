@@ -33,8 +33,7 @@
     "test": "jest",
     "format": "prettier --write ./src/ ./scripts/ ./test/ ./tsup.config.ts",
     "format:check": "prettier --check ./src/ ./scripts/ ./test/ ./tsup.config.ts",
-    "build": "tsup && npm run build:types",
-    "build:types": "tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('dist/index.d.ts', 'dist/index.d.cts')\"",
+    "build": "tsup",
     "build:dict": "node scripts/build-dict.js",
     "typecheck": "tsc --noEmit"
   },
@@ -68,7 +67,7 @@
     "jest": "^30.4.2",
     "prettier": "^3.9.5",
     "tsup": "^8.5.0",
-    "typescript": "^7.0.2"
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "kuromoji": "^0.1.2",
