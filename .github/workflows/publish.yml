@@ -1,63 +1,87 @@
-name: Publish to npm
+name: release
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release: a semver bump (patch/minor/major/prerelease) or an explicit version (e.g. 2.0.1)'
+        required: true
+        default: patch
+
+permissions:
+  contents: write # push the version commit/tag and create the GitHub Release
+  id-token: write # npm trusted publishing (OIDC)
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
         with:
-          node-version: "24.x"
-          registry-url: "https://registry.npmjs.org"
+          fetch-depth: 0
 
-      - name: Install dependencies
-        run: npm ci
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
 
-      - name: Check formatting & types
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Bump version
+        id: bump
         run: |
-          npm run format:check
-          npm run typecheck
+          OLD="$(node -p "require('./package.json').version")"
+          if [ "${{ inputs.version }}" = "prerelease" ]; then
+            npm version prerelease --preid=dev --no-git-tag-version --allow-same-version >/dev/null
+          else
+            npm version "${{ inputs.version }}" --no-git-tag-version --allow-same-version >/dev/null
+          fi
+          NEW="$(node -p "require('./package.json').version")"
+          echo "version=v${NEW}" >> "$GITHUB_OUTPUT"
+          if echo "$NEW" | grep -q 'dev'; then
+            echo "tag=dev" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$OLD" = "$NEW" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Version is already ${NEW}; skipping the bump commit but still releasing."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Build
-        run: npm run build
-
-      - name: Test
-        run: npm test
+      # npm CLI must be >=11.5.1 for trusted publishing (OIDC); pin explicitly
+      # since the version bundled with actions/setup-node can lag behind.
+      - run: npm install -g npm@11
 
       - name: Publish to npm
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          # If version includes 'dev', publish with 'dev' tag, otherwise use 'latest'
-          if echo "$VERSION" | grep -q 'dev'; then
-            TAG=dev
-          else
-            TAG=latest
-          fi
-          npm publish --provenance --access public --tag "$TAG"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance --tag "${{ steps.bump.outputs.tag }}"
 
-      - name: Create Git tag and GitHub Release
+      - name: Commit, tag and push
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ "${{ steps.bump.outputs.changed }}" = "true" ]; then
+            git commit -am "release: ${{ steps.bump.outputs.version }}"
+          fi
+          if ! git rev-parse -q --verify "refs/tags/${{ steps.bump.outputs.version }}" >/dev/null; then
+            git tag "${{ steps.bump.outputs.version }}"
+          fi
+          git push origin HEAD "${{ steps.bump.outputs.version }}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
           EXTRA_ARGS=""
-          if echo "$VERSION" | grep -q 'dev'; then
+          if [ "${{ steps.bump.outputs.tag }}" = "dev" ]; then
             EXTRA_ARGS="--prerelease"
           fi
-          gh release create "v$VERSION" dict/readings.tsv.gz \
-            --title "v$VERSION" \
+          gh release create "${{ steps.bump.outputs.version }}" dict/readings.tsv.gz \
+            --title "${{ steps.bump.outputs.version }}" \
             --generate-notes \
             $EXTRA_ARGS
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
