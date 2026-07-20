@@ -37,15 +37,17 @@ const { analyze } = require('gomamayo');
   const result1 = await analyze('ごまマヨネーズ');
   console.log(result1.isGomamayo); // true
   console.log(result1.degree); // 1
-  console.log(result1.matches[0].words); // ['ごま', 'マヨネーズ']
+  console.log(result1.matches[0]?.words); // ['ごま', 'マヨネーズ']
 
   // 2次ゴママヨの例 (固有名詞)
   const result2 = await analyze('博麗霊夢');
   console.log(result2.isGomamayo); // true
   console.log(result2.degree); // 2
-  console.log(result2.matches[0].readings); // ['ハクレイ', 'レイム']
+  console.log(result2.matches[0]?.readings); // ['ハクレイ', 'レイム']
 })();
 ```
+
+> `isGomamayo` が `false` の場合、`matches` は空配列です。`matches[0]` に直接アクセスせず、`?.` を使うか `isGomamayo`/`matches.length` を確認してください。
 
 ### オプション
 
