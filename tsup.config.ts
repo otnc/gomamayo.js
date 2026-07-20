@@ -1,7 +1,8 @@
 import { defineConfig } from "tsup";
 
-// 型定義 (d.ts/d.cts) は tsup ではなく tsc (tsconfig.build.json) で生成する。
-// TypeScript 7 (ネイティブ実装) には tsup の dts 生成が依存する JS API が無いため。
+// dts は tsup ではなく tsc (tsconfig.build.json) で生成する。
+// tsup の dts 生成 (rollup-plugin-dts) は TypeScript 7 が廃止した
+// Program API に依存しており、TS7 環境では動作しない。
 export default defineConfig([
   {
     entry: { index: "src/index.ts" },

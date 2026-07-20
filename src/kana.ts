@@ -5,20 +5,13 @@ export function hiraToKata(str: string): string {
   return wanakana.toKatakana(str, { passRomaji: true });
 }
 
-/**
- * 入力の正規化。
- * NFKC 正規化 (全角英数の半角化・半角カナの全角化を含む) + 空白除去
- */
+/** 入力の正規化 (NFKC + 空白除去) */
 export function normalize(str: string): string {
   return str.normalize("NFKC").replace(/\s+/g, "");
 }
 
-/**
- * モーラ分割の正規表現。
- * 拗音・外来音 (キャ, ファ, ティ など) を後続の小書き文字とまとめて
- * 1モーラとして扱う。モーラ分割を提供する保守された npm パッケージは
- * 存在しないため自前で実装している。
- */
+// 拗音・外来音 (キャ, ファ, ティ など) を後続の小書き文字とまとめて1モーラとして扱う。
+// モーラ分割を提供する保守された npm パッケージが無いため自前実装
 const MORA_PATTERN =
   /[ウクスツヌフムユルグズヅブプヴ][ァィェォ]|[イキシチニヒミリギジヂビピ][ャュェョ]|[テデ][ィュ]|[ァ-ヴー]/g;
 
@@ -27,12 +20,7 @@ export function divideMora(str: string): string[] {
   return str.match(MORA_PATTERN) ?? [];
 }
 
-/**
- * カナ → その母音 (長音「ー」の解決専用)。
- * ン・ッは母音を持たないためそのまま維持する。
- * ローマ字変換 (wanakana.toRomaji) からも導出できるが、
- * ン/ッ/ヲなどの特殊ケースを明示するためテーブルで保持している。
- */
+// カナ→母音 (長音「ー」の解決専用)。ン・ッは母音を持たないため据え置き
 const VOWEL_MAP: Record<string, string> = {
   ア: "ア",
   イ: "イ",
@@ -117,10 +105,7 @@ const VOWEL_MAP: Record<string, string> = {
   ヴ: "ウ",
 };
 
-/**
- * 長音「ー」を直前のモーラの母音に置き換える。
- * 例: ルータ → ルウタ (境界比較で「ウ」として扱えるようにする)
- */
+/** 長音「ー」を直前のモーラの母音に置き換える (例: ルータ → ルウタ) */
 export function prolongedToVowel(str: string): string {
   const moras = divideMora(str);
   if (moras.length === 0) return str;

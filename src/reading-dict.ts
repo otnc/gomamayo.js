@@ -4,11 +4,8 @@ import zlib from "node:zlib";
 const TAB = 0x09;
 const NL = 0x0a;
 
-/**
- * 固有名詞の読み表 (表記\t読み(カタカナ) の行を表記のUTF-8バイト順でソートしたTSV)。
- * 全体を1つのBufferとして保持し、行頭オフセット表に対する二分探索で引く。
- * Map等に展開しないため、メモリ使用量はほぼ生TSVサイズ(数十MB)で済む。
- */
+// 表記\t読み の行を表記のUTF-8バイト順でソートしたTSV。Buffer のまま二分探索で
+// 引くことで、Map 等に展開せずメモリ使用量を生TSVサイズ程度に抑える
 export class ReadingDict {
   private readonly buf: Buffer;
   private readonly offsets: Uint32Array;

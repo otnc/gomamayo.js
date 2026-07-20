@@ -19,10 +19,11 @@
 ### 改善
 
 - 解析時のメモリ使用量が GB 級 → 数百MB程度に減少しました
-- ビルドを tsup に移行し、ESM/CJS 両対応の型定義 (`.d.ts` / `.d.cts`) を出力するようになりました
-- TypeScript 7 (ネイティブ実装) を導入しました。型定義は `tsc` で直接生成し、テストの TS 変換は ts-jest から `@swc/jest` に移行しました
+- ビルドを tsup に移行し、ESM/CJS 両対応の型定義 (`.d.ts` / `.d.cts`) を出力するようになりました (型定義は tsup ではなく `tsc` で直接生成)
+- TypeScript 7 (ネイティブ実装) を導入しました
+- テストの TS 変換を ts-jest (TS7 非対応) から `@swc/jest` に移行し、`test/` から `src/` を直接実行するようにしました (ビルド不要)
 - かな変換を [wanakana](https://www.npmjs.com/package/wanakana) に置き換え、かな処理を `src/kana.ts` に集約しました
-- GitHub Actions: publish 時に `v{version}` タグと GitHub Release を自動作成、SudachiDict の月次自動追従 (`update-dict`)、Node 18/20/22 での CI を追加しました
+- GitHub Actions: publish 時に `v{version}` タグと GitHub Release を自動作成、SudachiDict の月次自動追従 (`update-dict`)、Node 22/24 での CI を追加しました
 
 ### 1.x からの移行
 

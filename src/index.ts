@@ -32,13 +32,9 @@ export interface GomamayoOptions {
   multi?: boolean;
   /** 固有名詞の読み辞書を使用するか (デフォルト: true) */
   useDict?: boolean;
-  /**
-   * この呼び出しでのみ使用するユーザー辞書 (表記→読み)。
-   * 読みはひらがな/カタカナで指定する。`addUserWords` と同様に
-   * 同梱辞書より優先される
-   */
+  /** この呼び出しにのみ適用するユーザー辞書 (表記→読み、かな表記) */
   userDict?: Record<string, string>;
-  /** @deprecated v1互換エイリアス。`useDict` を使用してください */
+  /** @deprecated `useDict` を使用してください */
   useNeologd?: boolean;
 }
 
@@ -126,11 +122,7 @@ function mapToDictSource(map: Map<string, string>): DictSource {
 
 const globalUserDict = new Map<string, string>();
 
-/**
- * ユーザー辞書に語を追加する (プロセス全体で有効)
- * @param words 表記→読み(ひらがな/カタカナ) のマップ
- * @example addUserWords({ 博麗霊夢: "はくれいれいむ" })
- */
+/** ユーザー辞書に語を追加する (プロセス全体で有効) */
 export function addUserWords(words: Record<string, string>): void {
   for (const [surface, reading] of toUserDictMap(words)) {
     globalUserDict.set(surface, reading);
@@ -165,11 +157,7 @@ function composeDictSources(sources: DictSource[]): DictSource | null {
   };
 }
 
-/**
- * トークナイザー・辞書のキャッシュをクリアしてメモリを解放する
- * @param type 'ipadic' | 'dict' | 'all' (デフォルト: 'all')
- *   'neologd' はv1互換のエイリアスで 'dict' と同じ扱い
- */
+/** トークナイザー・辞書のキャッシュをクリアしてメモリを解放する ('neologd' は 'dict' の互換エイリアス) */
 export function clearTokenizerCache(
   type: "ipadic" | "dict" | "neologd" | "all" = "all",
 ): void {
@@ -243,13 +231,8 @@ interface TokenInfo {
   merged: boolean;
 }
 
-/**
- * IPADICのトークン列に読み辞書を重ねる。
- * - トークン境界に沿って辞書エントリを最長一致で探し、
- *   複数トークンにまたがる固有名詞は辞書の読みを持つ1語に統合する
- * - 読みが取れなかった未知語は、単独トークンでも辞書で読みを補完する
- * - override (ユーザー辞書) は、IPADICが読みを持つ既知語の読みも上書きする
- */
+// トークン境界を最長一致で辞書に照合し、複数トークンにまたがる固有名詞を
+// 辞書の読みを持つ1語に統合する。override (ユーザー辞書) は既知語の読みも上書きする
 function applyReadingDict(
   tokens: IpadicFeatures[],
   text: string,
