@@ -1,3 +1,4 @@
+"use strict";
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -26,58 +27,125 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// cjs-source-ns:cjs-entry
-var cjs_entry_exports = {};
-__export(cjs_entry_exports, {
+// src/index.ts
+var src_exports = {};
+__export(src_exports, {
   analyze: () => analyze,
   clearTokenizerCache: () => clearTokenizerCache,
-  default: () => cjs_entry_default,
+  default: () => src_default,
   find: () => find,
   isGomamayo: () => isGomamayo
 });
-module.exports = __toCommonJS(cjs_entry_exports);
-var import_kuromoji = __toESM(require("kuromoji"));
-var import_path = __toESM(require("path"));
-var import_fs = __toESM(require("fs"));
-var getPackageRoot = () => {
-  try {
-    if (false) {
-      const currentFile = fileURLToPath(import_meta.url);
-      const currentDir = import_path.default.dirname(currentFile);
-      return import_path.default.resolve(currentDir, "..");
+module.exports = __toCommonJS(src_exports);
+
+// node_modules/tsup/assets/cjs_shims.js
+var getImportMetaUrl = () => typeof document === "undefined" ? new URL(`file:${__filename}`).href : document.currentScript && document.currentScript.tagName.toUpperCase() === "SCRIPT" ? document.currentScript.src : new URL("main.js", document.baseURI).href;
+var importMetaUrl = /* @__PURE__ */ getImportMetaUrl();
+
+// src/index.ts
+var import_kuromoji = __toESM(require("kuromoji"), 1);
+var import_node_path = __toESM(require("path"), 1);
+var import_node_fs2 = __toESM(require("fs"), 1);
+var import_node_url = require("url");
+var import_node_module = require("module");
+
+// src/reading-dict.ts
+var import_node_fs = __toESM(require("fs"), 1);
+var import_node_zlib = __toESM(require("zlib"), 1);
+var TAB = 9;
+var NL = 10;
+var ReadingDict = class _ReadingDict {
+  buf;
+  offsets;
+  /** 最長表記のUTF-8バイト長。コードユニット長の上限としても使える */
+  maxSurfaceLength;
+  size;
+  constructor(tsv) {
+    this.buf = tsv;
+    let lines = 0;
+    for (let i = 0; i < tsv.length; i++) {
+      if (tsv[i] === NL) lines++;
     }
-  } catch {
+    const offsets = new Uint32Array(lines);
+    let maxKey = 0;
+    let lineStart = 0;
+    let line = 0;
+    let tabPos = -1;
+    for (let i = 0; i < tsv.length; i++) {
+      const b = tsv[i];
+      if (b === TAB && tabPos < 0) {
+        tabPos = i;
+      } else if (b === NL) {
+        offsets[line++] = lineStart;
+        if (tabPos >= 0 && tabPos - lineStart > maxKey) {
+          maxKey = tabPos - lineStart;
+        }
+        lineStart = i + 1;
+        tabPos = -1;
+      }
+    }
+    this.offsets = offsets;
+    this.size = lines;
+    this.maxSurfaceLength = maxKey;
   }
-  if (typeof __dirname !== "undefined") {
-    return import_path.default.resolve(__dirname, "..");
+  static loadSync(filePath) {
+    return new _ReadingDict(import_node_zlib.default.gunzipSync(import_node_fs.default.readFileSync(filePath)));
   }
-  return process.cwd();
+  /** 表記と完全一致するエントリの読み(カタカナ)を返す */
+  lookup(surface) {
+    const key = Buffer.from(surface, "utf8");
+    let lo = 0;
+    let hi = this.size - 1;
+    while (lo <= hi) {
+      const mid = lo + hi >>> 1;
+      const cmp = this.compareAt(this.offsets[mid], key);
+      if (cmp === 0) {
+        return this.readingAt(this.offsets[mid]);
+      } else if (cmp < 0) {
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return null;
+  }
+  /** 行の表記部分とkeyをバイト比較する (エントリ < key: 負, 一致: 0, エントリ > key: 正) */
+  compareAt(offset, key) {
+    for (let i = 0; ; i++) {
+      const b = this.buf[offset + i];
+      const entryEnded = b === TAB || b === void 0;
+      if (i >= key.length) return entryEnded ? 0 : 1;
+      if (entryEnded) return -1;
+      if (b !== key[i]) return b < key[i] ? -1 : 1;
+    }
+  }
+  readingAt(offset) {
+    let tab = offset;
+    while (this.buf[tab] !== TAB) tab++;
+    let end = tab + 1;
+    while (end < this.buf.length && this.buf[end] !== NL) end++;
+    return this.buf.toString("utf8", tab + 1, end);
+  }
 };
-var packageRoot = getPackageRoot();
-var getPackageDictPath = (packageName) => {
-  const libDictPath = import_path.default.resolve(packageRoot, "lib", packageName);
-  if (import_fs.default.existsSync(libDictPath)) {
-    return libDictPath;
-  }
-  const nodeModulesDictPath = import_path.default.resolve(
-    packageRoot,
-    "node_modules",
-    packageName,
-    "dict"
-  );
-  if (import_fs.default.existsSync(nodeModulesDictPath)) {
-    return nodeModulesDictPath;
-  }
+
+// src/index.ts
+var requireFn = (0, import_node_module.createRequire)(importMetaUrl);
+var packageRoot = import_node_path.default.resolve(
+  import_node_path.default.dirname((0, import_node_url.fileURLToPath)(importMetaUrl)),
+  ".."
+);
+var getIpadicDictPath = () => {
   try {
-    const packagePath = require.resolve(`${packageName}/package.json`);
-    const dictPath = import_path.default.resolve(import_path.default.dirname(packagePath), "dict");
-    if (import_fs.default.existsSync(dictPath)) {
+    const pkgJson = requireFn.resolve("kuromoji/package.json");
+    const dictPath = import_node_path.default.join(import_node_path.default.dirname(pkgJson), "dict");
+    if (import_node_fs2.default.existsSync(dictPath)) {
       return dictPath;
     }
   } catch {
   }
-  return import_path.default.resolve("node_modules", packageName, "dict");
+  return import_node_path.default.join(packageRoot, "node_modules", "kuromoji", "dict");
 };
+var getReadingDictPath = () => import_node_path.default.join(packageRoot, "dict", "readings.tsv.gz");
 var VOWEL_MAP = {
   \u30A2: "\u30A2",
   \u30A4: "\u30A4",
@@ -167,7 +235,7 @@ function divideMora(str) {
 }
 function hiraToKata(str) {
   return str.replace(
-    /[\u3041-\u3096]/g,
+    /[ぁ-ゖ]/g,
     (c) => String.fromCharCode(c.charCodeAt(0) + 96)
   );
 }
@@ -205,12 +273,11 @@ function normalize(str) {
   );
 }
 var ipadicTokenizer = null;
-var neologdTokenizer = null;
+var readingDict = null;
 function getIpadicTokenizer() {
   if (!ipadicTokenizer) {
     ipadicTokenizer = new Promise((resolve, reject) => {
-      const dicPath = getPackageDictPath("kuromoji");
-      import_kuromoji.default.builder({ dicPath }).build((err, tokenizer) => {
+      import_kuromoji.default.builder({ dicPath: getIpadicDictPath() }).build((err, tokenizer) => {
         if (err) reject(err);
         else resolve(tokenizer);
       });
@@ -218,27 +285,22 @@ function getIpadicTokenizer() {
   }
   return ipadicTokenizer;
 }
-function getNeologdTokenizer() {
-  if (!neologdTokenizer) {
-    neologdTokenizer = new Promise((resolve, reject) => {
-      const dicPath = getPackageDictPath("kuromoji-neologd");
-      import_kuromoji.default.builder({ dicPath }).build((err, tokenizer) => {
-        if (err) reject(err);
-        else resolve(tokenizer);
-      });
-    });
+function getReadingDict() {
+  if (!readingDict) {
+    readingDict = ReadingDict.loadSync(getReadingDictPath());
   }
-  return neologdTokenizer;
+  return readingDict;
 }
 function clearTokenizerCache(type = "all") {
   if (type === "ipadic" || type === "all") {
     ipadicTokenizer = null;
   }
-  if (type === "neologd" || type === "all") {
-    neologdTokenizer = null;
+  if (type === "dict" || type === "neologd" || type === "all") {
+    readingDict = null;
   }
-  if (global.gc) {
-    global.gc();
+  const g = globalThis;
+  if (g.gc) {
+    g.gc();
   }
 }
 function findMaxDegree(formerMora, laterMora) {
@@ -280,52 +342,68 @@ function findInternalGomamayo(moras, higher) {
   }
   return results;
 }
-function buildTokenInfos(ipadicTokens, neologdTokens) {
-  const result = [];
-  if (neologdTokens && neologdTokens.length === 1 && ipadicTokens.length > 1) {
-    const neo = neologdTokens[0];
-    if (neo && neo.reading) {
-      const neoReading = hiraToKata(neo.reading);
-      const neoMoras = divideMora(neoReading);
-      let moraIdx = 0;
-      for (const token of ipadicTokens) {
-        const ipadicReading = getReading(token);
-        const ipadicMoraCount = divideMora(ipadicReading).length;
-        const tokenMoras = neoMoras.slice(moraIdx, moraIdx + ipadicMoraCount);
-        result.push({
-          surface: token.surface_form,
-          reading: tokenMoras.length > 0 ? tokenMoras.join("") : ipadicReading
-        });
-        moraIdx += ipadicMoraCount;
-      }
-      return result;
+function applyReadingDict(tokens, text, dict) {
+  const starts = [];
+  let acc = 0;
+  for (const token of tokens) {
+    starts.push(acc);
+    acc += token.surface_form.length;
+  }
+  const infos = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const start = starts[i];
+    let j = i;
+    while (j + 1 < tokens.length && starts[j + 1] + tokens[j + 1].surface_form.length - start <= dict.maxSurfaceLength) {
+      j++;
     }
-  }
-  for (const token of ipadicTokens) {
-    result.push({
+    let merged = false;
+    for (; j > i; j--) {
+      const end = starts[j] + tokens[j].surface_form.length;
+      const surface = text.slice(start, end);
+      const reading2 = dict.lookup(surface);
+      if (reading2) {
+        infos.push({ surface, reading: reading2, merged: true });
+        i = j + 1;
+        merged = true;
+        break;
+      }
+    }
+    if (merged) continue;
+    const token = tokens[i];
+    let reading = token.reading;
+    if (!reading) {
+      reading = dict.lookup(token.surface_form) ?? token.surface_form;
+    }
+    infos.push({
       surface: token.surface_form,
-      reading: getReading(token)
+      reading: hiraToKata(reading),
+      merged: false
     });
+    i++;
   }
-  return result;
+  return infos;
 }
 async function analyze(input, options = {}) {
-  const { higher = true, multi = true, useNeologd = true } = options;
-  const ipadic = await getIpadicTokenizer();
-  const neologd = useNeologd ? await getNeologdTokenizer() : null;
+  const { higher = true, multi = true } = options;
+  const useDict = options.useDict ?? options.useNeologd ?? true;
+  const tokenizer = await getIpadicTokenizer();
+  const dict = useDict ? getReadingDict() : null;
   const normalized = normalize(input);
-  const ipadicTokens = ipadic.tokenize(normalized);
-  const neologdTokens = neologd ? neologd.tokenize(normalized) : null;
+  const tokens = tokenizer.tokenize(normalized);
+  const tokenInfos = dict ? applyReadingDict(tokens, normalized, dict) : tokens.map((token) => ({
+    surface: token.surface_form,
+    reading: getReading(token),
+    merged: false
+  }));
   const result = {
     isGomamayo: false,
     matches: [],
     degree: 0,
     ary: 0,
     input,
-    reading: ""
+    reading: tokenInfos.map((t) => t.reading).join("")
   };
-  const tokenInfos = buildTokenInfos(ipadicTokens, neologdTokens);
-  result.reading = tokenInfos.map((t) => t.reading).join("");
   for (let i = 0; i < tokenInfos.length - 1; i++) {
     const former = tokenInfos[i];
     const later = tokenInfos[i + 1];
@@ -348,10 +426,10 @@ async function analyze(input, options = {}) {
       if (!multi) break;
     }
   }
-  if (result.ary === 0 && neologdTokens && neologdTokens.length === 1 && ipadicTokens.length > 1) {
-    const token = neologdTokens[0];
-    if (token && token.reading) {
-      const reading = prolongedToVowel(hiraToKata(token.reading));
+  if (multi || result.ary === 0) {
+    outer: for (const info of tokenInfos) {
+      if (!info.merged) continue;
+      const reading = prolongedToVowel(info.reading);
       const moras = divideMora(reading);
       const internal = findInternalGomamayo(moras, higher);
       for (const match of internal) {
@@ -359,14 +437,14 @@ async function analyze(input, options = {}) {
           const beforeMoras = moras.slice(0, match.position);
           const afterMoras = moras.slice(match.position);
           result.matches.push({
-            words: [token.surface_form, token.surface_form],
+            words: [info.surface, info.surface],
             readings: [beforeMoras.join(""), afterMoras.join("")],
             degree: match.degree,
             position: match.position
           });
           result.degree = Math.max(result.degree, match.degree);
           result.ary++;
-          if (!multi) break;
+          if (!multi) break outer;
         }
       }
     }
@@ -381,7 +459,7 @@ async function find(input, options = {}) {
   const result = await analyze(input, options);
   return result.isGomamayo ? result.matches : null;
 }
-var cjs_entry_default = { analyze, isGomamayo, find, clearTokenizerCache };
+var src_default = { analyze, isGomamayo, find, clearTokenizerCache };
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   analyze,

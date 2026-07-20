@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import { analyze, GomamayoOptions, GomamayoResult } from "./index.js";
@@ -6,7 +7,8 @@ interface Arguments {
   text: string;
   higher: boolean;
   multi: boolean;
-  neologd: boolean;
+  dict: boolean;
+  neologd?: boolean;
 }
 
 const argv = yargs(hideBin(process.argv))
@@ -30,17 +32,22 @@ const argv = yargs(hideBin(process.argv))
     type: "boolean",
     default: true,
   })
-  .option("neologd", {
-    alias: "n",
-    describe: "neologd辞書を使用するか (メモリ節約のためfalseにできる)",
+  .option("dict", {
+    alias: "d",
+    describe: "固有名詞の読み辞書を使用するか (メモリ節約のためfalseにできる)",
     type: "boolean",
     default: true,
+  })
+  .option("neologd", {
+    describe: "[非推奨] --dict のv1互換エイリアス",
+    type: "boolean",
+    hidden: true,
   })
   .example("$0 ごまマヨネーズ", "基本的な使用方法")
   .example("$0 オレンジレンジ --higher true", "高次ゴママヨ検出あり")
   .example("$0 太鼓公募募集終了 --multi true", "多項ゴママヨ検出あり")
   .example("$0 ごまマヨネーズ --higher false", "高次ゴママヨ検出なし")
-  .example("$0 ごまマヨネーズ --neologd false", "neologd辞書なし(省メモリ)")
+  .example("$0 ごまマヨネーズ --dict false", "読み辞書なし(省メモリ)")
   .help()
   .alias("help", "?")
   .version()
@@ -52,12 +59,12 @@ const argv = yargs(hideBin(process.argv))
   const options: GomamayoOptions = {
     higher: argv.higher,
     multi: argv.multi,
-    useNeologd: argv.neologd,
+    useDict: argv.neologd ?? argv.dict,
   };
 
   console.log(`入力文字列: ${inputText}`);
   console.log(
-    `オプション: higher=${options.higher}, multi=${options.multi}, useNeologd=${options.useNeologd}`,
+    `オプション: higher=${options.higher}, multi=${options.multi}, useDict=${options.useDict}`,
   );
   console.log("");
 

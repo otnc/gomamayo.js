@@ -1,10 +1,4 @@
 #!/usr/bin/env node
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined") return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
 
 // src/cli.ts
 import yargs from "yargs";
@@ -13,47 +7,107 @@ import { hideBin } from "yargs/helpers";
 // src/index.ts
 import kuromoji from "kuromoji";
 import path from "path";
-import fs from "fs";
+import fs2 from "fs";
 import { fileURLToPath } from "url";
-var getPackageRoot = () => {
-  try {
-    if (true) {
-      const currentFile = fileURLToPath(import.meta.url);
-      const currentDir = path.dirname(currentFile);
-      return path.resolve(currentDir, "..");
+import { createRequire } from "module";
+
+// src/reading-dict.ts
+import fs from "fs";
+import zlib from "zlib";
+var TAB = 9;
+var NL = 10;
+var ReadingDict = class _ReadingDict {
+  buf;
+  offsets;
+  /** 最長表記のUTF-8バイト長。コードユニット長の上限としても使える */
+  maxSurfaceLength;
+  size;
+  constructor(tsv) {
+    this.buf = tsv;
+    let lines = 0;
+    for (let i = 0; i < tsv.length; i++) {
+      if (tsv[i] === NL) lines++;
     }
-  } catch {
+    const offsets = new Uint32Array(lines);
+    let maxKey = 0;
+    let lineStart = 0;
+    let line = 0;
+    let tabPos = -1;
+    for (let i = 0; i < tsv.length; i++) {
+      const b = tsv[i];
+      if (b === TAB && tabPos < 0) {
+        tabPos = i;
+      } else if (b === NL) {
+        offsets[line++] = lineStart;
+        if (tabPos >= 0 && tabPos - lineStart > maxKey) {
+          maxKey = tabPos - lineStart;
+        }
+        lineStart = i + 1;
+        tabPos = -1;
+      }
+    }
+    this.offsets = offsets;
+    this.size = lines;
+    this.maxSurfaceLength = maxKey;
   }
-  if (typeof __dirname !== "undefined") {
-    return path.resolve(__dirname, "..");
+  static loadSync(filePath) {
+    return new _ReadingDict(zlib.gunzipSync(fs.readFileSync(filePath)));
   }
-  return process.cwd();
+  /** 表記と完全一致するエントリの読み(カタカナ)を返す */
+  lookup(surface) {
+    const key = Buffer.from(surface, "utf8");
+    let lo = 0;
+    let hi = this.size - 1;
+    while (lo <= hi) {
+      const mid = lo + hi >>> 1;
+      const cmp = this.compareAt(this.offsets[mid], key);
+      if (cmp === 0) {
+        return this.readingAt(this.offsets[mid]);
+      } else if (cmp < 0) {
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return null;
+  }
+  /** 行の表記部分とkeyをバイト比較する (エントリ < key: 負, 一致: 0, エントリ > key: 正) */
+  compareAt(offset, key) {
+    for (let i = 0; ; i++) {
+      const b = this.buf[offset + i];
+      const entryEnded = b === TAB || b === void 0;
+      if (i >= key.length) return entryEnded ? 0 : 1;
+      if (entryEnded) return -1;
+      if (b !== key[i]) return b < key[i] ? -1 : 1;
+    }
+  }
+  readingAt(offset) {
+    let tab = offset;
+    while (this.buf[tab] !== TAB) tab++;
+    let end = tab + 1;
+    while (end < this.buf.length && this.buf[end] !== NL) end++;
+    return this.buf.toString("utf8", tab + 1, end);
+  }
 };
-var packageRoot = getPackageRoot();
-var getPackageDictPath = (packageName) => {
-  const libDictPath = path.resolve(packageRoot, "lib", packageName);
-  if (fs.existsSync(libDictPath)) {
-    return libDictPath;
-  }
-  const nodeModulesDictPath = path.resolve(
-    packageRoot,
-    "node_modules",
-    packageName,
-    "dict"
-  );
-  if (fs.existsSync(nodeModulesDictPath)) {
-    return nodeModulesDictPath;
-  }
+
+// src/index.ts
+var requireFn = createRequire(import.meta.url);
+var packageRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  ".."
+);
+var getIpadicDictPath = () => {
   try {
-    const packagePath = __require.resolve(`${packageName}/package.json`);
-    const dictPath = path.resolve(path.dirname(packagePath), "dict");
-    if (fs.existsSync(dictPath)) {
+    const pkgJson = requireFn.resolve("kuromoji/package.json");
+    const dictPath = path.join(path.dirname(pkgJson), "dict");
+    if (fs2.existsSync(dictPath)) {
       return dictPath;
     }
   } catch {
   }
-  return path.resolve("node_modules", packageName, "dict");
+  return path.join(packageRoot, "node_modules", "kuromoji", "dict");
 };
+var getReadingDictPath = () => path.join(packageRoot, "dict", "readings.tsv.gz");
 var VOWEL_MAP = {
   \u30A2: "\u30A2",
   \u30A4: "\u30A4",
@@ -143,7 +197,7 @@ function divideMora(str) {
 }
 function hiraToKata(str) {
   return str.replace(
-    /[\u3041-\u3096]/g,
+    /[ぁ-ゖ]/g,
     (c) => String.fromCharCode(c.charCodeAt(0) + 96)
   );
 }
@@ -181,12 +235,11 @@ function normalize(str) {
   );
 }
 var ipadicTokenizer = null;
-var neologdTokenizer = null;
+var readingDict = null;
 function getIpadicTokenizer() {
   if (!ipadicTokenizer) {
     ipadicTokenizer = new Promise((resolve, reject) => {
-      const dicPath = getPackageDictPath("kuromoji");
-      kuromoji.builder({ dicPath }).build((err, tokenizer) => {
+      kuromoji.builder({ dicPath: getIpadicDictPath() }).build((err, tokenizer) => {
         if (err) reject(err);
         else resolve(tokenizer);
       });
@@ -194,17 +247,11 @@ function getIpadicTokenizer() {
   }
   return ipadicTokenizer;
 }
-function getNeologdTokenizer() {
-  if (!neologdTokenizer) {
-    neologdTokenizer = new Promise((resolve, reject) => {
-      const dicPath = getPackageDictPath("kuromoji-neologd");
-      kuromoji.builder({ dicPath }).build((err, tokenizer) => {
-        if (err) reject(err);
-        else resolve(tokenizer);
-      });
-    });
+function getReadingDict() {
+  if (!readingDict) {
+    readingDict = ReadingDict.loadSync(getReadingDictPath());
   }
-  return neologdTokenizer;
+  return readingDict;
 }
 function findMaxDegree(formerMora, laterMora) {
   const maxCheck = Math.min(formerMora.length, laterMora.length);
@@ -245,52 +292,68 @@ function findInternalGomamayo(moras, higher) {
   }
   return results;
 }
-function buildTokenInfos(ipadicTokens, neologdTokens) {
-  const result = [];
-  if (neologdTokens && neologdTokens.length === 1 && ipadicTokens.length > 1) {
-    const neo = neologdTokens[0];
-    if (neo && neo.reading) {
-      const neoReading = hiraToKata(neo.reading);
-      const neoMoras = divideMora(neoReading);
-      let moraIdx = 0;
-      for (const token of ipadicTokens) {
-        const ipadicReading = getReading(token);
-        const ipadicMoraCount = divideMora(ipadicReading).length;
-        const tokenMoras = neoMoras.slice(moraIdx, moraIdx + ipadicMoraCount);
-        result.push({
-          surface: token.surface_form,
-          reading: tokenMoras.length > 0 ? tokenMoras.join("") : ipadicReading
-        });
-        moraIdx += ipadicMoraCount;
-      }
-      return result;
+function applyReadingDict(tokens, text, dict) {
+  const starts = [];
+  let acc = 0;
+  for (const token of tokens) {
+    starts.push(acc);
+    acc += token.surface_form.length;
+  }
+  const infos = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const start = starts[i];
+    let j = i;
+    while (j + 1 < tokens.length && starts[j + 1] + tokens[j + 1].surface_form.length - start <= dict.maxSurfaceLength) {
+      j++;
     }
-  }
-  for (const token of ipadicTokens) {
-    result.push({
+    let merged = false;
+    for (; j > i; j--) {
+      const end = starts[j] + tokens[j].surface_form.length;
+      const surface = text.slice(start, end);
+      const reading2 = dict.lookup(surface);
+      if (reading2) {
+        infos.push({ surface, reading: reading2, merged: true });
+        i = j + 1;
+        merged = true;
+        break;
+      }
+    }
+    if (merged) continue;
+    const token = tokens[i];
+    let reading = token.reading;
+    if (!reading) {
+      reading = dict.lookup(token.surface_form) ?? token.surface_form;
+    }
+    infos.push({
       surface: token.surface_form,
-      reading: getReading(token)
+      reading: hiraToKata(reading),
+      merged: false
     });
+    i++;
   }
-  return result;
+  return infos;
 }
 async function analyze(input, options = {}) {
-  const { higher = true, multi = true, useNeologd = true } = options;
-  const ipadic = await getIpadicTokenizer();
-  const neologd = useNeologd ? await getNeologdTokenizer() : null;
+  const { higher = true, multi = true } = options;
+  const useDict = options.useDict ?? options.useNeologd ?? true;
+  const tokenizer = await getIpadicTokenizer();
+  const dict = useDict ? getReadingDict() : null;
   const normalized = normalize(input);
-  const ipadicTokens = ipadic.tokenize(normalized);
-  const neologdTokens = neologd ? neologd.tokenize(normalized) : null;
+  const tokens = tokenizer.tokenize(normalized);
+  const tokenInfos = dict ? applyReadingDict(tokens, normalized, dict) : tokens.map((token) => ({
+    surface: token.surface_form,
+    reading: getReading(token),
+    merged: false
+  }));
   const result = {
     isGomamayo: false,
     matches: [],
     degree: 0,
     ary: 0,
     input,
-    reading: ""
+    reading: tokenInfos.map((t) => t.reading).join("")
   };
-  const tokenInfos = buildTokenInfos(ipadicTokens, neologdTokens);
-  result.reading = tokenInfos.map((t) => t.reading).join("");
   for (let i = 0; i < tokenInfos.length - 1; i++) {
     const former = tokenInfos[i];
     const later = tokenInfos[i + 1];
@@ -313,10 +376,10 @@ async function analyze(input, options = {}) {
       if (!multi) break;
     }
   }
-  if (result.ary === 0 && neologdTokens && neologdTokens.length === 1 && ipadicTokens.length > 1) {
-    const token = neologdTokens[0];
-    if (token && token.reading) {
-      const reading = prolongedToVowel(hiraToKata(token.reading));
+  if (multi || result.ary === 0) {
+    outer: for (const info of tokenInfos) {
+      if (!info.merged) continue;
+      const reading = prolongedToVowel(info.reading);
       const moras = divideMora(reading);
       const internal = findInternalGomamayo(moras, higher);
       for (const match of internal) {
@@ -324,14 +387,14 @@ async function analyze(input, options = {}) {
           const beforeMoras = moras.slice(0, match.position);
           const afterMoras = moras.slice(match.position);
           result.matches.push({
-            words: [token.surface_form, token.surface_form],
+            words: [info.surface, info.surface],
             readings: [beforeMoras.join(""), afterMoras.join("")],
             degree: match.degree,
             position: match.position
           });
           result.degree = Math.max(result.degree, match.degree);
           result.ary++;
-          if (!multi) break;
+          if (!multi) break outer;
         }
       }
     }
@@ -357,22 +420,26 @@ var argv = yargs(hideBin(process.argv)).scriptName("gomamayo").usage("$0 <text>"
   describe: "\u591A\u9805\u30B4\u30DE\u30DE\u30E8\u3092\u691C\u51FA\u3059\u308B\u304B",
   type: "boolean",
   default: true
-}).option("neologd", {
-  alias: "n",
-  describe: "neologd\u8F9E\u66F8\u3092\u4F7F\u7528\u3059\u308B\u304B (\u30E1\u30E2\u30EA\u7BC0\u7D04\u306E\u305F\u3081false\u306B\u3067\u304D\u308B)",
+}).option("dict", {
+  alias: "d",
+  describe: "\u56FA\u6709\u540D\u8A5E\u306E\u8AAD\u307F\u8F9E\u66F8\u3092\u4F7F\u7528\u3059\u308B\u304B (\u30E1\u30E2\u30EA\u7BC0\u7D04\u306E\u305F\u3081false\u306B\u3067\u304D\u308B)",
   type: "boolean",
   default: true
-}).example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA", "\u57FA\u672C\u7684\u306A\u4F7F\u7528\u65B9\u6CD5").example("$0 \u30AA\u30EC\u30F3\u30B8\u30EC\u30F3\u30B8 --higher true", "\u9AD8\u6B21\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u3042\u308A").example("$0 \u592A\u9F13\u516C\u52DF\u52DF\u96C6\u7D42\u4E86 --multi true", "\u591A\u9805\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u3042\u308A").example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA --higher false", "\u9AD8\u6B21\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u306A\u3057").example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA --neologd false", "neologd\u8F9E\u66F8\u306A\u3057(\u7701\u30E1\u30E2\u30EA)").help().alias("help", "?").version().alias("version", "v").parseSync();
+}).option("neologd", {
+  describe: "[\u975E\u63A8\u5968] --dict \u306Ev1\u4E92\u63DB\u30A8\u30A4\u30EA\u30A2\u30B9",
+  type: "boolean",
+  hidden: true
+}).example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA", "\u57FA\u672C\u7684\u306A\u4F7F\u7528\u65B9\u6CD5").example("$0 \u30AA\u30EC\u30F3\u30B8\u30EC\u30F3\u30B8 --higher true", "\u9AD8\u6B21\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u3042\u308A").example("$0 \u592A\u9F13\u516C\u52DF\u52DF\u96C6\u7D42\u4E86 --multi true", "\u591A\u9805\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u3042\u308A").example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA --higher false", "\u9AD8\u6B21\u30B4\u30DE\u30DE\u30E8\u691C\u51FA\u306A\u3057").example("$0 \u3054\u307E\u30DE\u30E8\u30CD\u30FC\u30BA --dict false", "\u8AAD\u307F\u8F9E\u66F8\u306A\u3057(\u7701\u30E1\u30E2\u30EA)").help().alias("help", "?").version().alias("version", "v").parseSync();
 (async function() {
   const inputText = argv.text;
   const options = {
     higher: argv.higher,
     multi: argv.multi,
-    useNeologd: argv.neologd
+    useDict: argv.neologd ?? argv.dict
   };
   console.log(`\u5165\u529B\u6587\u5B57\u5217: ${inputText}`);
   console.log(
-    `\u30AA\u30D7\u30B7\u30E7\u30F3: higher=${options.higher}, multi=${options.multi}, useNeologd=${options.useNeologd}`
+    `\u30AA\u30D7\u30B7\u30E7\u30F3: higher=${options.higher}, multi=${options.multi}, useDict=${options.useDict}`
   );
   console.log("");
   try {

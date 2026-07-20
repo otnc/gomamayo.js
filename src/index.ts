@@ -1,60 +1,37 @@
 import kuromoji, { Tokenizer, IpadicFeatures } from "kuromoji";
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from "url";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { ReadingDict } from "./reading-dict.js";
 
-declare const __BUILD_FORMAT__: "esm" | "cjs";
-declare const __dirname: string;
+// tsupのshims設定により、import.meta.url はCJSビルドでも利用できる
+const requireFn = createRequire(import.meta.url);
+const packageRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
-const getPackageRoot = (): string => {
+const getIpadicDictPath = (): string => {
   try {
-    if (typeof __BUILD_FORMAT__ !== "undefined" && __BUILD_FORMAT__ === "esm") {
-      const currentFile = fileURLToPath(import.meta.url);
-      const currentDir = path.dirname(currentFile);
-      return path.resolve(currentDir, "..");
-    }
-  } catch {}
-
-  if (typeof __dirname !== "undefined") {
-    return path.resolve(__dirname, "..");
-  }
-
-  return process.cwd();
-};
-
-const packageRoot = getPackageRoot();
-
-const getPackageDictPath = (packageName: string): string => {
-  const libDictPath = path.resolve(packageRoot, "lib", packageName);
-  if (fs.existsSync(libDictPath)) {
-    return libDictPath;
-  }
-
-  const nodeModulesDictPath = path.resolve(
-    packageRoot,
-    "node_modules",
-    packageName,
-    "dict",
-  );
-  if (fs.existsSync(nodeModulesDictPath)) {
-    return nodeModulesDictPath;
-  }
-
-  try {
-    const packagePath = require.resolve(`${packageName}/package.json`);
-    const dictPath = path.resolve(path.dirname(packagePath), "dict");
+    const pkgJson = requireFn.resolve("kuromoji/package.json");
+    const dictPath = path.join(path.dirname(pkgJson), "dict");
     if (fs.existsSync(dictPath)) {
       return dictPath;
     }
   } catch {}
-
-  return path.resolve("node_modules", packageName, "dict");
+  return path.join(packageRoot, "node_modules", "kuromoji", "dict");
 };
+
+const getReadingDictPath = (): string =>
+  path.join(packageRoot, "dict", "readings.tsv.gz");
 
 export interface GomamayoOptions {
   higher?: boolean;
   multi?: boolean;
-  /** neologd辞書を使用するか (デフォルト: true) */
+  /** 固有名詞の読み辞書を使用するか (デフォルト: true) */
+  useDict?: boolean;
+  /** @deprecated v1互換エイリアス。`useDict` を使用してください */
   useNeologd?: boolean;
 }
 
@@ -166,7 +143,7 @@ function divideMora(str: string): string[] {
 }
 
 function hiraToKata(str: string): string {
-  return str.replace(/[\u3041-\u3096]/g, (c) =>
+  return str.replace(/[ぁ-ゖ]/g, (c) =>
     String.fromCharCode(c.charCodeAt(0) + 0x60),
   );
 }
@@ -211,50 +188,47 @@ function normalize(str: string): string {
 }
 
 let ipadicTokenizer: Promise<Tokenizer<IpadicFeatures>> | null = null;
-let neologdTokenizer: Promise<Tokenizer<IpadicFeatures>> | null = null;
+let readingDict: ReadingDict | null = null;
 
 function getIpadicTokenizer(): Promise<Tokenizer<IpadicFeatures>> {
   if (!ipadicTokenizer) {
     ipadicTokenizer = new Promise((resolve, reject) => {
-      const dicPath = getPackageDictPath("kuromoji");
-      kuromoji.builder({ dicPath }).build((err, tokenizer) => {
-        if (err) reject(err);
-        else resolve(tokenizer);
-      });
+      kuromoji
+        .builder({ dicPath: getIpadicDictPath() })
+        .build((err, tokenizer) => {
+          if (err) reject(err);
+          else resolve(tokenizer);
+        });
     });
   }
   return ipadicTokenizer;
 }
 
-function getNeologdTokenizer(): Promise<Tokenizer<IpadicFeatures>> {
-  if (!neologdTokenizer) {
-    neologdTokenizer = new Promise((resolve, reject) => {
-      const dicPath = getPackageDictPath("kuromoji-neologd");
-      kuromoji.builder({ dicPath }).build((err, tokenizer) => {
-        if (err) reject(err);
-        else resolve(tokenizer);
-      });
-    });
+function getReadingDict(): ReadingDict {
+  if (!readingDict) {
+    readingDict = ReadingDict.loadSync(getReadingDictPath());
   }
-  return neologdTokenizer;
+  return readingDict;
 }
 
 /**
- * トークナイザーのキャッシュをクリアしてメモリを解放する
- * @param type 'ipadic' | 'neologd' | 'all' (デフォルト: 'all')
+ * トークナイザー・辞書のキャッシュをクリアしてメモリを解放する
+ * @param type 'ipadic' | 'dict' | 'all' (デフォルト: 'all')
+ *   'neologd' はv1互換のエイリアスで 'dict' と同じ扱い
  */
 export function clearTokenizerCache(
-  type: "ipadic" | "neologd" | "all" = "all",
+  type: "ipadic" | "dict" | "neologd" | "all" = "all",
 ): void {
   if (type === "ipadic" || type === "all") {
     ipadicTokenizer = null;
   }
-  if (type === "neologd" || type === "all") {
-    neologdTokenizer = null;
+  if (type === "dict" || type === "neologd" || type === "all") {
+    readingDict = null;
   }
-  // ガベージコレクションを促すヒント
-  if (global.gc) {
-    global.gc();
+  // ガベージコレクションを促すヒント (--expose-gc 実行時のみ)
+  const g = globalThis as { gc?: () => void };
+  if (g.gc) {
+    g.gc();
   }
 }
 
@@ -311,57 +285,92 @@ function findInternalGomamayo(
 interface TokenInfo {
   surface: string;
   reading: string;
+  /** 読み辞書により複数トークンを1語に統合したもの(固有名詞) */
+  merged: boolean;
 }
 
-function buildTokenInfos(
-  ipadicTokens: IpadicFeatures[],
-  neologdTokens: IpadicFeatures[] | null,
+/**
+ * IPADICのトークン列に読み辞書を重ねる。
+ * - トークン境界に沿って辞書エントリを最長一致で探し、
+ *   複数トークンにまたがる固有名詞は辞書の読みを持つ1語に統合する
+ * - 読みが取れなかった未知語は、単独トークンでも辞書で読みを補完する
+ */
+function applyReadingDict(
+  tokens: IpadicFeatures[],
+  text: string,
+  dict: ReadingDict,
 ): TokenInfo[] {
-  const result: TokenInfo[] = [];
+  const starts: number[] = [];
+  let acc = 0;
+  for (const token of tokens) {
+    starts.push(acc);
+    acc += token.surface_form.length;
+  }
 
-  if (neologdTokens && neologdTokens.length === 1 && ipadicTokens.length > 1) {
-    const neo = neologdTokens[0];
-    if (neo && neo.reading) {
-      const neoReading = hiraToKata(neo.reading);
-      const neoMoras = divideMora(neoReading);
+  const infos: TokenInfo[] = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const start = starts[i]!;
 
-      let moraIdx = 0;
-      for (const token of ipadicTokens) {
-        const ipadicReading = getReading(token);
-        const ipadicMoraCount = divideMora(ipadicReading).length;
-
-        const tokenMoras = neoMoras.slice(moraIdx, moraIdx + ipadicMoraCount);
-        result.push({
-          surface: token.surface_form,
-          reading: tokenMoras.length > 0 ? tokenMoras.join("") : ipadicReading,
-        });
-        moraIdx += ipadicMoraCount;
-      }
-      return result;
+    // 辞書の最長表記を超えない範囲で、最も遠いトークン境界から試す
+    let j = i;
+    while (
+      j + 1 < tokens.length &&
+      starts[j + 1]! + tokens[j + 1]!.surface_form.length - start <=
+        dict.maxSurfaceLength
+    ) {
+      j++;
     }
-  }
 
-  for (const token of ipadicTokens) {
-    result.push({
+    let merged = false;
+    for (; j > i; j--) {
+      const end = starts[j]! + tokens[j]!.surface_form.length;
+      const surface = text.slice(start, end);
+      const reading = dict.lookup(surface);
+      if (reading) {
+        infos.push({ surface, reading, merged: true });
+        i = j + 1;
+        merged = true;
+        break;
+      }
+    }
+    if (merged) continue;
+
+    const token = tokens[i]!;
+    let reading = token.reading;
+    if (!reading) {
+      reading = dict.lookup(token.surface_form) ?? token.surface_form;
+    }
+    infos.push({
       surface: token.surface_form,
-      reading: getReading(token),
+      reading: hiraToKata(reading),
+      merged: false,
     });
+    i++;
   }
-  return result;
+  return infos;
 }
 
 export async function analyze(
   input: string,
   options: GomamayoOptions = {},
 ): Promise<GomamayoResult> {
-  const { higher = true, multi = true, useNeologd = true } = options;
+  const { higher = true, multi = true } = options;
+  const useDict = options.useDict ?? options.useNeologd ?? true;
 
-  const ipadic = await getIpadicTokenizer();
-  const neologd = useNeologd ? await getNeologdTokenizer() : null;
+  const tokenizer = await getIpadicTokenizer();
+  const dict = useDict ? getReadingDict() : null;
 
   const normalized = normalize(input);
-  const ipadicTokens = ipadic.tokenize(normalized);
-  const neologdTokens = neologd ? neologd.tokenize(normalized) : null;
+  const tokens = tokenizer.tokenize(normalized);
+
+  const tokenInfos: TokenInfo[] = dict
+    ? applyReadingDict(tokens, normalized, dict)
+    : tokens.map((token) => ({
+        surface: token.surface_form,
+        reading: getReading(token),
+        merged: false,
+      }));
 
   const result: GomamayoResult = {
     isGomamayo: false,
@@ -369,12 +378,10 @@ export async function analyze(
     degree: 0,
     ary: 0,
     input,
-    reading: "",
+    reading: tokenInfos.map((t) => t.reading).join(""),
   };
 
-  const tokenInfos = buildTokenInfos(ipadicTokens, neologdTokens);
-  result.reading = tokenInfos.map((t) => t.reading).join("");
-
+  // 単語境界のゴママヨ検出
   for (let i = 0; i < tokenInfos.length - 1; i++) {
     const former = tokenInfos[i];
     const later = tokenInfos[i + 1];
@@ -403,15 +410,12 @@ export async function analyze(
     }
   }
 
-  if (
-    result.ary === 0 &&
-    neologdTokens &&
-    neologdTokens.length === 1 &&
-    ipadicTokens.length > 1
-  ) {
-    const token = neologdTokens[0];
-    if (token && token.reading) {
-      const reading = prolongedToVowel(hiraToKata(token.reading));
+  // 統合した固有名詞の内部のゴママヨ検出 (例: 博麗霊夢 = ハクレイ|レイム)
+  if (multi || result.ary === 0) {
+    outer: for (const info of tokenInfos) {
+      if (!info.merged) continue;
+
+      const reading = prolongedToVowel(info.reading);
       const moras = divideMora(reading);
       const internal = findInternalGomamayo(moras, higher);
 
@@ -420,14 +424,14 @@ export async function analyze(
           const beforeMoras = moras.slice(0, match.position);
           const afterMoras = moras.slice(match.position);
           result.matches.push({
-            words: [token.surface_form, token.surface_form],
+            words: [info.surface, info.surface],
             readings: [beforeMoras.join(""), afterMoras.join("")],
             degree: match.degree,
             position: match.position,
           });
           result.degree = Math.max(result.degree, match.degree);
           result.ary++;
-          if (!multi) break;
+          if (!multi) break outer;
         }
       }
     }
