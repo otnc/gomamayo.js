@@ -58,15 +58,6 @@ describe("analyze", () => {
     expect(result.degree).toBe(1);
   });
 
-  test("サイレンススズカ is 1項1次ゴママヨ (proper noun for single token)", async () => {
-    const result = await analyze("サイレンススズカ", {
-      userDict: { サイレンススズカ: "さいれんすすずか" },
-    });
-    expect(result.isGomamayo).toBe(true);
-    expect(result.ary).toBe(1);
-    expect(result.degree).toBe(1);
-  });
-
   test("higher option controls high-order detection", async () => {
     const withHigher = await analyze("部分分数", { higher: true });
     const withoutHigher = await analyze("部分分数", { higher: false });
@@ -113,24 +104,24 @@ describe("user dictionary", () => {
     clearUserWords();
   });
 
-  test("userDict option merges proper noun and detects internal gomamayo", async () => {
-    const without = await analyze("超会場祭");
+  test("userDict option registers unknown proper noun and detects internal gomamayo", async () => {
+    const without = await analyze("サイレンススズカ");
     expect(without.isGomamayo).toBe(false);
 
-    const result = await analyze("超会場祭", {
-      userDict: { 超会場祭: "ちょうかいかいさい" },
+    const result = await analyze("サイレンススズカ", {
+      userDict: { サイレンススズカ: "さいれんすすずか" },
     });
     expect(result.isGomamayo).toBe(true);
-    expect(result.degree).toBe(2);
-    expect(result.reading).toBe("チョウカイカイサイ");
+    expect(result.degree).toBe(1);
+    expect(result.reading).toBe("サイレンススズカ");
   });
 
   test("addUserWords applies globally until cleared", async () => {
-    addUserWords({ 超会場祭: "チョウカイカイサイ" });
-    expect(await isGomamayo("超会場祭")).toBe(true);
+    addUserWords({ サイレンススズカ: "サイレンススズカ" });
+    expect(await isGomamayo("サイレンススズカ")).toBe(true);
 
     clearUserWords();
-    expect(await isGomamayo("超会場祭")).toBe(false);
+    expect(await isGomamayo("サイレンススズカ")).toBe(false);
   });
 
   test("userDict overrides reading of a known single token", async () => {

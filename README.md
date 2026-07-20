@@ -69,20 +69,20 @@ await analyze('博麗霊夢', { useDict: false });
 import { analyze, addUserWords, removeUserWords, clearUserWords } from 'gomamayo';
 
 // プロセス全体に登録 (読みはひらがな/カタカナ)
-addUserWords({ 超会場祭: 'ちょうかいかいさい' });
-await analyze('超会場祭'); // isGomamayo: true (チョウカイ|カイサイ)
+addUserWords({ サイレンススズカ: 'さいれんすすずか' });
+await analyze('サイレンススズカ'); // isGomamayo: true (サイレンス|スズカ)
 
-removeUserWords(['超会場祭']); // 個別削除
+removeUserWords(['サイレンススズカ']); // 個別削除
 clearUserWords(); // 全削除
 
 // 1回の呼び出しにだけ適用する場合
-await analyze('超会場祭', { userDict: { 超会場祭: 'ちょうかいかいさい' } });
+await analyze('サイレンススズカ', { userDict: { サイレンススズカ: 'さいれんすすずか' } });
 ```
 
 CLI では TSV ファイル (1行につき `表記<TAB>読み`、`#` で始まる行はコメント) を渡せます。
 
 ```bash
-npx gomamayo 超会場祭 --user-dict mydict.tsv
+npx gomamayo サイレンススズカ --user-dict mydict.tsv
 ```
 
 ### メモリ管理
