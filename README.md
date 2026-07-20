@@ -20,7 +20,7 @@ MeCab不要のゴママヨ検出ライブラリ
 npm install gomamayo
 ```
 
-Node.js 18 以上が必要です。
+Node.js 22 以上が必要です。
 
 ## Usage
 
