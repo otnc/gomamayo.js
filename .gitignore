@@ -9,3 +9,6 @@ dict.zip
 
 # Config
 .env
+
+# Build output
+dist/
