@@ -47,6 +47,8 @@ const { analyze } = require('gomamayo');
 })();
 ```
 
+> [!WARNING]
+>   
 > `isGomamayo` が `false` の場合、`matches` は空配列です。`matches[0]` に直接アクセスせず、`?.` を使うか `isGomamayo`/`matches.length` を確認してください。
 
 ### オプション
