@@ -1,60 +1,40 @@
 import kuromoji, { Tokenizer, IpadicFeatures } from "kuromoji";
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from "url";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { ReadingDict } from "./reading-dict.js";
+import { hiraToKata, normalize, divideMora, prolongedToVowel } from "./kana.js";
 
-declare const __BUILD_FORMAT__: "esm" | "cjs";
-declare const __dirname: string;
+// tsupのshims設定により、import.meta.url はCJSビルドでも利用できる
+const requireFn = createRequire(import.meta.url);
+const packageRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
-const getPackageRoot = (): string => {
+const getIpadicDictPath = (): string => {
   try {
-    if (typeof __BUILD_FORMAT__ !== "undefined" && __BUILD_FORMAT__ === "esm") {
-      const currentFile = fileURLToPath(import.meta.url);
-      const currentDir = path.dirname(currentFile);
-      return path.resolve(currentDir, "..");
-    }
-  } catch {}
-
-  if (typeof __dirname !== "undefined") {
-    return path.resolve(__dirname, "..");
-  }
-
-  return process.cwd();
-};
-
-const packageRoot = getPackageRoot();
-
-const getPackageDictPath = (packageName: string): string => {
-  const libDictPath = path.resolve(packageRoot, "lib", packageName);
-  if (fs.existsSync(libDictPath)) {
-    return libDictPath;
-  }
-
-  const nodeModulesDictPath = path.resolve(
-    packageRoot,
-    "node_modules",
-    packageName,
-    "dict",
-  );
-  if (fs.existsSync(nodeModulesDictPath)) {
-    return nodeModulesDictPath;
-  }
-
-  try {
-    const packagePath = require.resolve(`${packageName}/package.json`);
-    const dictPath = path.resolve(path.dirname(packagePath), "dict");
+    const pkgJson = requireFn.resolve("kuromoji/package.json");
+    const dictPath = path.join(path.dirname(pkgJson), "dict");
     if (fs.existsSync(dictPath)) {
       return dictPath;
     }
   } catch {}
-
-  return path.resolve("node_modules", packageName, "dict");
+  return path.join(packageRoot, "node_modules", "kuromoji", "dict");
 };
+
+const getReadingDictPath = (): string =>
+  path.join(packageRoot, "dict", "readings.tsv.gz");
 
 export interface GomamayoOptions {
   higher?: boolean;
   multi?: boolean;
-  /** neologd辞書を使用するか (デフォルト: true) */
+  /** 固有名詞の読み辞書を使用するか (デフォルト: true) */
+  useDict?: boolean;
+  /** この呼び出しにのみ適用するユーザー辞書 (表記→読み、かな表記) */
+  userDict?: Record<string, string>;
+  /** @deprecated `useDict` を使用してください */
   useNeologd?: boolean;
 }
 
@@ -74,187 +54,123 @@ export interface GomamayoResult {
   reading: string;
 }
 
-const VOWEL_MAP: Record<string, string> = {
-  ア: "ア",
-  イ: "イ",
-  ウ: "ウ",
-  エ: "エ",
-  オ: "オ",
-  カ: "ア",
-  キ: "イ",
-  ク: "ウ",
-  ケ: "エ",
-  コ: "オ",
-  サ: "ア",
-  シ: "イ",
-  ス: "ウ",
-  セ: "エ",
-  ソ: "オ",
-  タ: "ア",
-  チ: "イ",
-  ツ: "ウ",
-  テ: "エ",
-  ト: "オ",
-  ナ: "ア",
-  ニ: "イ",
-  ヌ: "ウ",
-  ネ: "エ",
-  ノ: "オ",
-  ハ: "ア",
-  ヒ: "イ",
-  フ: "ウ",
-  ヘ: "エ",
-  ホ: "オ",
-  マ: "ア",
-  ミ: "イ",
-  ム: "ウ",
-  メ: "エ",
-  モ: "オ",
-  ヤ: "ア",
-  ユ: "ウ",
-  ヨ: "オ",
-  ラ: "ア",
-  リ: "イ",
-  ル: "ウ",
-  レ: "エ",
-  ロ: "オ",
-  ワ: "ア",
-  ヲ: "オ",
-  ン: "ン",
-  ガ: "ア",
-  ギ: "イ",
-  グ: "ウ",
-  ゲ: "エ",
-  ゴ: "オ",
-  ザ: "ア",
-  ジ: "イ",
-  ズ: "ウ",
-  ゼ: "エ",
-  ゾ: "オ",
-  ダ: "ア",
-  ヂ: "イ",
-  ヅ: "ウ",
-  デ: "エ",
-  ド: "オ",
-  バ: "ア",
-  ビ: "イ",
-  ブ: "ウ",
-  ベ: "エ",
-  ボ: "オ",
-  パ: "ア",
-  ピ: "イ",
-  プ: "ウ",
-  ペ: "エ",
-  ポ: "オ",
-  ァ: "ア",
-  ィ: "イ",
-  ゥ: "ウ",
-  ェ: "エ",
-  ォ: "オ",
-  ャ: "ア",
-  ュ: "ウ",
-  ョ: "オ",
-  ッ: "ッ",
-  ヴ: "ウ",
-};
-
-const MORA_PATTERN =
-  /[ウクスツヌフムユルグズヅブプヴ][ァィェォ]|[イキシチニヒミリギジヂビピ][ャュェョ]|[テデ][ィュ]|[ァ-ヴー]/g;
-
-function divideMora(str: string): string[] {
-  return str.match(MORA_PATTERN) ?? [];
-}
-
-function hiraToKata(str: string): string {
-  return str.replace(/[\u3041-\u3096]/g, (c) =>
-    String.fromCharCode(c.charCodeAt(0) + 0x60),
-  );
-}
-
-function prolongedToVowel(str: string): string {
-  const moras = divideMora(str);
-  if (moras.length === 0) return str;
-  const first = moras[0];
-  if (!first) return str;
-
-  const result: string[] = [first];
-  for (let i = 1; i < moras.length; i++) {
-    const current = moras[i];
-    if (!current) continue;
-    if (current === "ー") {
-      const prevMora = moras[i - 1];
-      if (prevMora) {
-        const lastChar = prevMora[prevMora.length - 1];
-        result.push(lastChar ? (VOWEL_MAP[lastChar] ?? lastChar) : current);
-      } else {
-        result.push(current);
-      }
-    } else {
-      result.push(current);
-    }
-  }
-  return result.join("");
-}
-
 function getReading(token: IpadicFeatures): string {
   const reading = token.reading ?? token.surface_form;
   return hiraToKata(reading);
 }
 
-function normalize(str: string): string {
-  return str
-    .normalize("NFKC")
-    .replace(/\s+/g, "")
-    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) =>
-      String.fromCharCode(c.charCodeAt(0) - 0xfee0),
-    );
-}
-
 let ipadicTokenizer: Promise<Tokenizer<IpadicFeatures>> | null = null;
-let neologdTokenizer: Promise<Tokenizer<IpadicFeatures>> | null = null;
+let readingDict: ReadingDict | null = null;
 
 function getIpadicTokenizer(): Promise<Tokenizer<IpadicFeatures>> {
   if (!ipadicTokenizer) {
     ipadicTokenizer = new Promise((resolve, reject) => {
-      const dicPath = getPackageDictPath("kuromoji");
-      kuromoji.builder({ dicPath }).build((err, tokenizer) => {
-        if (err) reject(err);
-        else resolve(tokenizer);
-      });
+      kuromoji
+        .builder({ dicPath: getIpadicDictPath() })
+        .build((err, tokenizer) => {
+          if (err) reject(err);
+          else resolve(tokenizer);
+        });
     });
   }
   return ipadicTokenizer;
 }
 
-function getNeologdTokenizer(): Promise<Tokenizer<IpadicFeatures>> {
-  if (!neologdTokenizer) {
-    neologdTokenizer = new Promise((resolve, reject) => {
-      const dicPath = getPackageDictPath("kuromoji-neologd");
-      kuromoji.builder({ dicPath }).build((err, tokenizer) => {
-        if (err) reject(err);
-        else resolve(tokenizer);
-      });
-    });
+function getReadingDict(): ReadingDict {
+  if (!readingDict) {
+    readingDict = ReadingDict.loadSync(getReadingDictPath());
   }
-  return neologdTokenizer;
+  return readingDict;
 }
 
-/**
- * トークナイザーのキャッシュをクリアしてメモリを解放する
- * @param type 'ipadic' | 'neologd' | 'all' (デフォルト: 'all')
- */
+/** 読みを引ける辞書の共通インターフェース (ReadingDict も構造的に満たす) */
+interface DictSource {
+  maxSurfaceLength: number;
+  lookup(surface: string): string | null;
+}
+
+const KANA_READING = /^[ァ-ヴー]+$/;
+
+function toUserDictMap(words: Record<string, string>): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const [rawSurface, rawReading] of Object.entries(words)) {
+    const surface = normalize(rawSurface);
+    const reading = hiraToKata(normalize(rawReading));
+    if (surface.length === 0) {
+      throw new Error(`ユーザー辞書の表記が空です: "${rawSurface}"`);
+    }
+    if (!KANA_READING.test(reading)) {
+      throw new Error(
+        `ユーザー辞書の読みはかな表記で指定してください: "${rawSurface}" -> "${rawReading}"`,
+      );
+    }
+    map.set(surface, reading);
+  }
+  return map;
+}
+
+function mapToDictSource(map: Map<string, string>): DictSource {
+  let maxLen = 0;
+  for (const surface of map.keys()) {
+    if (surface.length > maxLen) maxLen = surface.length;
+  }
+  return {
+    maxSurfaceLength: maxLen,
+    lookup: (surface) => map.get(surface) ?? null,
+  };
+}
+
+const globalUserDict = new Map<string, string>();
+
+/** ユーザー辞書に語を追加する (プロセス全体で有効) */
+export function addUserWords(words: Record<string, string>): void {
+  for (const [surface, reading] of toUserDictMap(words)) {
+    globalUserDict.set(surface, reading);
+  }
+}
+
+/** ユーザー辞書から語を削除する */
+export function removeUserWords(surfaces: string[]): void {
+  for (const surface of surfaces) {
+    globalUserDict.delete(normalize(surface));
+  }
+}
+
+/** ユーザー辞書を空にする */
+export function clearUserWords(): void {
+  globalUserDict.clear();
+}
+
+function composeDictSources(sources: DictSource[]): DictSource | null {
+  const active = sources.filter((s) => s.maxSurfaceLength > 0);
+  if (active.length === 0) return null;
+  if (active.length === 1) return active[0]!;
+  return {
+    maxSurfaceLength: Math.max(...active.map((s) => s.maxSurfaceLength)),
+    lookup: (surface) => {
+      for (const source of active) {
+        const reading = source.lookup(surface);
+        if (reading) return reading;
+      }
+      return null;
+    },
+  };
+}
+
+/** トークナイザー・辞書のキャッシュをクリアしてメモリを解放する ('neologd' は 'dict' の互換エイリアス) */
 export function clearTokenizerCache(
-  type: "ipadic" | "neologd" | "all" = "all",
+  type: "ipadic" | "dict" | "neologd" | "all" = "all",
 ): void {
   if (type === "ipadic" || type === "all") {
     ipadicTokenizer = null;
   }
-  if (type === "neologd" || type === "all") {
-    neologdTokenizer = null;
+  if (type === "dict" || type === "neologd" || type === "all") {
+    readingDict = null;
   }
-  // ガベージコレクションを促すヒント
-  if (global.gc) {
-    global.gc();
+  // ガベージコレクションを促すヒント (--expose-gc 実行時のみ)
+  const g = globalThis as { gc?: () => void };
+  if (g.gc) {
+    g.gc();
   }
 }
 
@@ -311,57 +227,113 @@ function findInternalGomamayo(
 interface TokenInfo {
   surface: string;
   reading: string;
+  /** 読み辞書により複数トークンを1語に統合したもの(固有名詞) */
+  merged: boolean;
 }
 
-function buildTokenInfos(
-  ipadicTokens: IpadicFeatures[],
-  neologdTokens: IpadicFeatures[] | null,
+// トークン境界を最長一致で辞書に照合し、複数トークンにまたがる固有名詞を
+// 辞書の読みを持つ1語に統合する。override (ユーザー辞書) は既知語の読みも上書きする
+function applyReadingDict(
+  tokens: IpadicFeatures[],
+  text: string,
+  dict: DictSource,
+  override: DictSource | null,
 ): TokenInfo[] {
-  const result: TokenInfo[] = [];
+  const starts: number[] = [];
+  let acc = 0;
+  for (const token of tokens) {
+    starts.push(acc);
+    acc += token.surface_form.length;
+  }
 
-  if (neologdTokens && neologdTokens.length === 1 && ipadicTokens.length > 1) {
-    const neo = neologdTokens[0];
-    if (neo && neo.reading) {
-      const neoReading = hiraToKata(neo.reading);
-      const neoMoras = divideMora(neoReading);
+  const infos: TokenInfo[] = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const start = starts[i]!;
 
-      let moraIdx = 0;
-      for (const token of ipadicTokens) {
-        const ipadicReading = getReading(token);
-        const ipadicMoraCount = divideMora(ipadicReading).length;
-
-        const tokenMoras = neoMoras.slice(moraIdx, moraIdx + ipadicMoraCount);
-        result.push({
-          surface: token.surface_form,
-          reading: tokenMoras.length > 0 ? tokenMoras.join("") : ipadicReading,
-        });
-        moraIdx += ipadicMoraCount;
-      }
-      return result;
+    // 辞書の最長表記を超えない範囲で、最も遠いトークン境界から試す
+    let j = i;
+    while (
+      j + 1 < tokens.length &&
+      starts[j + 1]! + tokens[j + 1]!.surface_form.length - start <=
+        dict.maxSurfaceLength
+    ) {
+      j++;
     }
-  }
 
-  for (const token of ipadicTokens) {
-    result.push({
+    let merged = false;
+    for (; j > i; j--) {
+      const end = starts[j]! + tokens[j]!.surface_form.length;
+      const surface = text.slice(start, end);
+      const reading = dict.lookup(surface);
+      if (reading) {
+        infos.push({ surface, reading, merged: true });
+        i = j + 1;
+        merged = true;
+        break;
+      }
+    }
+    if (merged) continue;
+
+    // 辞書由来の読みは単一トークンでも内部ゴママヨ判定の対象にする
+    const token = tokens[i]!;
+    const overrideReading = override?.lookup(token.surface_form);
+    let reading: string;
+    let fromDict: boolean;
+    if (overrideReading) {
+      reading = overrideReading;
+      fromDict = true;
+    } else if (token.reading) {
+      reading = token.reading;
+      fromDict = false;
+    } else {
+      const dictReading = dict.lookup(token.surface_form);
+      reading = dictReading ?? token.surface_form;
+      fromDict = dictReading !== null;
+    }
+    infos.push({
       surface: token.surface_form,
-      reading: getReading(token),
+      reading: hiraToKata(reading),
+      merged: fromDict,
     });
+    i++;
   }
-  return result;
+  return infos;
 }
 
 export async function analyze(
   input: string,
   options: GomamayoOptions = {},
 ): Promise<GomamayoResult> {
-  const { higher = true, multi = true, useNeologd = true } = options;
+  const { higher = true, multi = true } = options;
+  const useDict = options.useDict ?? options.useNeologd ?? true;
 
-  const ipadic = await getIpadicTokenizer();
-  const neologd = useNeologd ? await getNeologdTokenizer() : null;
+  const tokenizer = await getIpadicTokenizer();
+
+  // ユーザー辞書(呼び出し単位 → グローバル)を同梱辞書より優先して重ねる
+  const userSources: DictSource[] = [];
+  if (options.userDict) {
+    userSources.push(mapToDictSource(toUserDictMap(options.userDict)));
+  }
+  if (globalUserDict.size > 0) {
+    userSources.push(mapToDictSource(globalUserDict));
+  }
+  const override = composeDictSources(userSources);
+  const dict = composeDictSources([
+    ...userSources,
+    ...(useDict ? [getReadingDict()] : []),
+  ]);
 
   const normalized = normalize(input);
-  const ipadicTokens = ipadic.tokenize(normalized);
-  const neologdTokens = neologd ? neologd.tokenize(normalized) : null;
+  const tokens = tokenizer.tokenize(normalized);
+
+  const tokenInfos: TokenInfo[] = dict
+    ? applyReadingDict(tokens, normalized, dict, override)
+    : tokens.map((token) => ({
+        surface: token.surface_form,
+        reading: getReading(token),
+        merged: false,
+      }));
 
   const result: GomamayoResult = {
     isGomamayo: false,
@@ -369,12 +341,10 @@ export async function analyze(
     degree: 0,
     ary: 0,
     input,
-    reading: "",
+    reading: tokenInfos.map((t) => t.reading).join(""),
   };
 
-  const tokenInfos = buildTokenInfos(ipadicTokens, neologdTokens);
-  result.reading = tokenInfos.map((t) => t.reading).join("");
-
+  // 単語境界のゴママヨ検出
   for (let i = 0; i < tokenInfos.length - 1; i++) {
     const former = tokenInfos[i];
     const later = tokenInfos[i + 1];
@@ -403,15 +373,12 @@ export async function analyze(
     }
   }
 
-  if (
-    result.ary === 0 &&
-    neologdTokens &&
-    neologdTokens.length === 1 &&
-    ipadicTokens.length > 1
-  ) {
-    const token = neologdTokens[0];
-    if (token && token.reading) {
-      const reading = prolongedToVowel(hiraToKata(token.reading));
+  // 統合した固有名詞の内部のゴママヨ検出 (例: 博麗霊夢 = ハクレイ|レイム)
+  if (multi || result.ary === 0) {
+    outer: for (const info of tokenInfos) {
+      if (!info.merged) continue;
+
+      const reading = prolongedToVowel(info.reading);
       const moras = divideMora(reading);
       const internal = findInternalGomamayo(moras, higher);
 
@@ -420,14 +387,14 @@ export async function analyze(
           const beforeMoras = moras.slice(0, match.position);
           const afterMoras = moras.slice(match.position);
           result.matches.push({
-            words: [token.surface_form, token.surface_form],
+            words: [info.surface, info.surface],
             readings: [beforeMoras.join(""), afterMoras.join("")],
             degree: match.degree,
             position: match.position,
           });
           result.degree = Math.max(result.degree, match.degree);
           result.ary++;
-          if (!multi) break;
+          if (!multi) break outer;
         }
       }
     }
@@ -452,4 +419,12 @@ export async function find(
   return result.isGomamayo ? result.matches : null;
 }
 
-export default { analyze, isGomamayo, find, clearTokenizerCache };
+export default {
+  analyze,
+  isGomamayo,
+  find,
+  clearTokenizerCache,
+  addUserWords,
+  removeUserWords,
+  clearUserWords,
+};

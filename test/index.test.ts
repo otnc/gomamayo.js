@@ -1,4 +1,10 @@
-import { analyze, isGomamayo, find } from "../dist/index.cjs";
+import {
+  analyze,
+  isGomamayo,
+  find,
+  addUserWords,
+  clearUserWords,
+} from "../src/index";
 
 describe("analyze", () => {
   test("ごまマヨネーズ is 1項1次", async () => {
@@ -45,6 +51,22 @@ describe("analyze", () => {
     expect(result.degree).toBe(2);
   });
 
+  test("葉山舞鈴 is 1項1次ゴママヨ（proper noun）", async () => {
+    const result = await analyze("葉山舞鈴");
+    expect(result.isGomamayo).toBe(true);
+    expect(result.ary).toBe(1);
+    expect(result.degree).toBe(1);
+  });
+
+  test("サイレンススズカ is 1項1次ゴママヨ (proper noun for single token)", async () => {
+    const result = await analyze("サイレンススズカ", {
+      userDict: { サイレンススズカ: "さいれんすすずか" },
+    });
+    expect(result.isGomamayo).toBe(true);
+    expect(result.ary).toBe(1);
+    expect(result.degree).toBe(1);
+  });
+
   test("higher option controls high-order detection", async () => {
     const withHigher = await analyze("部分分数", { higher: true });
     const withoutHigher = await analyze("部分分数", { higher: false });
@@ -83,6 +105,43 @@ describe("isGomamayo", () => {
 
   test("returns false for non-ゴママヨ", async () => {
     expect(await isGomamayo("パパイヤ")).toBe(false);
+  });
+});
+
+describe("user dictionary", () => {
+  afterEach(() => {
+    clearUserWords();
+  });
+
+  test("userDict option merges proper noun and detects internal gomamayo", async () => {
+    const without = await analyze("超会場祭");
+    expect(without.isGomamayo).toBe(false);
+
+    const result = await analyze("超会場祭", {
+      userDict: { 超会場祭: "ちょうかいかいさい" },
+    });
+    expect(result.isGomamayo).toBe(true);
+    expect(result.degree).toBe(2);
+    expect(result.reading).toBe("チョウカイカイサイ");
+  });
+
+  test("addUserWords applies globally until cleared", async () => {
+    addUserWords({ 超会場祭: "チョウカイカイサイ" });
+    expect(await isGomamayo("超会場祭")).toBe(true);
+
+    clearUserWords();
+    expect(await isGomamayo("超会場祭")).toBe(false);
+  });
+
+  test("userDict overrides reading of a known single token", async () => {
+    const result = await analyze("会場", { userDict: { 会場: "かいば" } });
+    expect(result.reading).toBe("カイバ");
+  });
+
+  test("rejects non-kana readings", async () => {
+    await expect(
+      analyze("会場", { userDict: { 会場: "kaijo" } }),
+    ).rejects.toThrow(/かな表記/);
   });
 });
 
