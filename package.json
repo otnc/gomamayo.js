@@ -1,28 +1,41 @@
 {
   "name": "gomamayo",
-  "version": "1.1.7",
+  "version": "2.0.0",
   "description": "MeCab不要のゴママヨ検出ライブラリ",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
-  "exports": {
-    "import": "./dist/index.js",
-    "require": "./dist/index.cjs"
-  },
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
   "bin": {
     "gomamayo": "./dist/cli.js"
   },
+  "files": [
+    "dist",
+    "dict"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
-    "postinstall": "npm i -D unzip-stream && node scripts/postinstall.js",
     "setup": "npm install && node scripts/setup.js",
     "test": "jest",
-    "clean": "rimraf dist lib",
     "format": "prettier --write ./src/ ./scripts/",
     "format:check": "prettier --check ./src/ ./scripts/",
-    "build:types": "tsc",
-    "build:js": "node scripts/build.js",
-    "build": "npm run clean && npm run format && npm run build:types && npm run build:js"
+    "build": "tsup",
+    "build:dict": "node scripts/build-dict.js",
+    "typecheck": "tsc --noEmit"
   },
   "repository": {
     "type": "git",
@@ -31,6 +44,7 @@
   "keywords": [
     "gomamayo",
     "kuromoji",
+    "sudachidict",
     "jp",
     "japan",
     "japanese"
@@ -48,20 +62,14 @@
     "@types/yargs": "^17.0.35",
     "adm-zip": "^0.5.16",
     "consola": "^3.4.2",
-    "cross-env": "^10.1.0",
-    "esbuild": "^0.27.2",
     "jest": "^30.2.0",
     "prettier": "^3.8.0",
-    "rimraf": "^6.1.2",
     "ts-jest": "^29.4.6",
-    "typescript": "^5.9.3",
-    "unzip-stream": "^0.3.4"
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "kuromoji": "^0.1.2",
     "yargs": "^18.0.0"
-  },
-  "optionalDependencies": {
-    "kuromoji-neologd": "^314159270.0.0"
   }
 }
