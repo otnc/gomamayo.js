@@ -1,10 +1,10 @@
-name: Manual Publish to npm
+name: Publish to npm
 
 on:
   workflow_dispatch:
 
 jobs:
-  publish-npm:
+  publish:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -16,39 +16,22 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20.x"
+          node-version: "22.x"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Install dependencies (without postinstall)
-        run: |
-          npm ci --ignore-scripts
-          cd node_modules/kuromoji-neologd
-          npm install node-fetch adm-zip
-          node postscript.js
-          cd ../..
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Create and upload dict.zip to GitHub Releases
+      - name: Check formatting & types
         run: |
-          npm install adm-zip
-          node scripts/create-dict-zip.js
-          # Delete existing dict release if exists
-          gh release delete dict --yes || true
-          git push origin :refs/tags/dict || true
-          # Create new release with dict.zip
-          gh release create dict dict.zip --title "Dictionary files" --notes "Kuromoji dictionaries for gomamayo"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          npm run format:check
+          npm run typecheck
 
-      - name: Run postinstall (download from release)
-        run: |
-          npm install node-fetch adm-zip
-          rm -rf lib
-          node scripts/postinstall.js
+      - name: Build
+        run: npm run build
 
-      - name: Build and Test
-        run: |
-          npm run build
-          npm test
+      - name: Test
+        run: npm test
 
       - name: Commit dist directory (if changed)
         run: |
@@ -72,9 +55,18 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Create and Push Git Tag
+      - name: Create Git tag and GitHub Release
         run: |
-          # This step now runs after the dist commit, ensuring the tag points to the correct commit.
           VERSION=$(node -p "require('./package.json').version")
           git tag "v$VERSION"
           git push origin "v$VERSION"
+          EXTRA_ARGS=""
+          if echo "$VERSION" | grep -q 'dev'; then
+            EXTRA_ARGS="--prerelease"
+          fi
+          gh release create "v$VERSION" dict/readings.tsv.gz \
+            --title "v$VERSION" \
+            --generate-notes \
+            $EXTRA_ARGS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

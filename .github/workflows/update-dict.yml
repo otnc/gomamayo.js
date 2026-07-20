@@ -1,0 +1,57 @@
+name: Update dictionary
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SudachiDict raw lexicon version (e.g. 20260428)。省略時は latest"
+        required: false
+  schedule:
+    # 毎月2日 03:00 UTC (SudachiDict の更新を月次で取り込む)
+    - cron: "0 3 2 * *"
+
+jobs:
+  update-dict:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build dictionary
+        run: node scripts/build-dict.js "${{ github.event.inputs.version || 'latest' }}"
+
+      - name: Build & Test with new dictionary
+        run: |
+          npm run build
+          npm test
+
+      - name: Create Pull Request (if changed)
+        run: |
+          if [ -z "$(git status --porcelain dict/)" ]; then
+            echo "Dictionary is up to date."
+            exit 0
+          fi
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="chore/update-dict-$(date +%Y%m%d)"
+          git checkout -b "$BRANCH"
+          git add dict
+          git commit -m "chore: update reading dictionary ($(cat dict/VERSION))"
+          git push origin "$BRANCH" --force
+          gh pr create \
+            --title "chore: update reading dictionary" \
+            --body "$(cat dict/VERSION) から読み表を再生成しました。" \
+            --base main || echo "PR already exists"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
