@@ -2,25 +2,24 @@
 
 MeCab不要のゴママヨ検出ライブラリ
 
-[kuromoji.js](https://www.npmjs.com/package/kuromoji) とそのdict、 [kuromoji-ipadic-neologd](https://www.npmjs.com/package/kuromoji-neologd) のdict を使用して精度を向上させています。  
-固有名詞のゴママヨも一応検出可能です。
+[kuromoji.js](https://www.npmjs.com/package/kuromoji) の分かち書きに、[SudachiDict](https://github.com/WorksApplications/SudachiDict) から生成した固有名詞の読み表を重ねて解析します。
+「博麗霊夢(ハクレイ|レイム)」のような固有名詞のゴママヨも検出できます。
 
-> [!WARNING]  
-> 使用している辞書のサイズが非常に大きく、判定時の `kuromoji.builder({ dicPath }).build((err, tokenizer) => { ... });` でかなり膨大なメモリを消費します(Linux環境での検証時は4GB程度)  
-> メモリに余裕がない環境で使用する際は、判定の制度は下がりますが `useNeologd` を `false` に設定することをおすすめします。
-
-> [!NOTE]  
-> 使用している辞書のサイズが非常に大きく、導入のためのスクリプトが特殊なため、開発者の環境ではインストールに3分ほど要しました。  
-> [自作のゴママヨ判定のインストールに3分も掛かるという動画(YouTube)](https://youtu.be/jKc3m-9EHko)  
-> ~~スクリプトなどを改善し、現在は開発者の環境では1分未満でインストールが可能になりました。 (v1.1.3 より)~~
+> [!NOTE]
+> v2.0.0 で辞書構成を刷新しました。
+>
+> - `postinstall` での辞書ダウンロード(約380MB)を廃止し、`npm install` だけで即使えるようになりました
+> - 巨大な NEologd 辞書(2020年から更新停止)の代わりに、四半期更新されている SudachiDict 由来の読み表(約13MB)を同梱しています
+> - 解析時のメモリ使用量が GB 級 → 数百MB程度に減りました
+> - `useNeologd` オプションは `useDict` に改名されました(旧名もエイリアスとして動作します)
 
 ## Install
-
-以下の操作のみで使用できるはずです。
 
 ```bash
 npm install gomamayo
 ```
+
+Node.js 18 以上が必要です。
 
 ## Usage
 
@@ -39,7 +38,7 @@ const { analyze } = require('gomamayo');
   console.log(result1.degree); // 1
   console.log(result1.matches[0].words); // ['ごま', 'マヨネーズ']
 
-  // 2次ゴママヨの例
+  // 2次ゴママヨの例 (固有名詞)
   const result2 = await analyze('博麗霊夢');
   console.log(result2.isGomamayo); // true
   console.log(result2.degree); // 2
@@ -56,8 +55,8 @@ await analyze('博麗霊夢', { higher: false });
 // 多項ゴママヨを検出しない（最初の1項のみ）
 await analyze('太鼓公募募集終了', { multi: false });
 
-// neologd辞書を使用しない（メモリ節約、ただし固有名詞の検出精度が低下）
-await analyze('博麗霊夢', { useNeologd: false });
+// 固有名詞の読み辞書を使用しない（メモリ節約、ただし固有名詞の検出精度が低下）
+await analyze('博麗霊夢', { useDict: false });
 ```
 
 ### メモリ管理
@@ -73,14 +72,9 @@ const result = await analyze('ごまマヨネーズ');
 
 // 辞書キャッシュをクリアしてメモリを解放
 clearTokenizerCache(); // 全ての辞書を解放
-clearTokenizerCache('neologd'); // neologd辞書のみ解放
+clearTokenizerCache('dict'); // 読み辞書のみ解放
 clearTokenizerCache('ipadic'); // ipadic辞書のみ解放
 ```
-
-> [!TIP]  
-> メモリ使用量を抑えたい場合：
-> - `useNeologd: false` を指定すると、neologd辞書をロードせずに解析できます（約50%のメモリ削減）
-> - 解析後に `clearTokenizerCache()` を呼び出すと、辞書をメモリから解放できます
 
 ## CLI
 
@@ -94,7 +88,7 @@ npx gomamayo 博麗霊夢
 # オプション
 npx gomamayo 博麗霊夢 --higher false  # 高次検出なし
 npx gomamayo 太鼓公募募集終了 --multi false  # 多項検出なし
-npx gomamayo ごまマヨネーズ --neologd false  # neologd辞書なし（省メモリ）
+npx gomamayo ごまマヨネーズ --dict false  # 読み辞書なし（省メモリ）
 ```
 
 ## API
@@ -113,9 +107,17 @@ npx gomamayo ごまマヨネーズ --neologd false  # neologd辞書なし（省�
 
 ### `clearTokenizerCache(type?)`
 
-トークナイザーのキャッシュをクリアしてメモリを解放します。
+トークナイザー・辞書のキャッシュをクリアしてメモリを解放します。
 
-- `type`: `'ipadic'` | `'neologd'` | `'all'` (デフォルト: `'all'`)
+- `type`: `'ipadic'` | `'dict'` | `'all'` (デフォルト: `'all'`)
+  - `'neologd'` は v1 互換のエイリアスで `'dict'` と同じ扱いです
+
+## 辞書について
+
+- 分かち書き・基本語彙の読み: [kuromoji.js](https://www.npmjs.com/package/kuromoji) 同梱の IPADIC 辞書
+- 固有名詞の読み: [SudachiDict](https://github.com/WorksApplications/SudachiDict) の語彙表から生成した読み表 (`dict/readings.tsv.gz`、約138万語)
+
+読み表は `npm run build:dict` で再生成できます。SudachiDict の新バージョンへの追従は GitHub Actions (`update-dict`) が毎月自動で行います。
 
 ## 貢献
 
@@ -133,5 +135,5 @@ npx gomamayo ごまマヨネーズ --neologd false  # neologd辞書なし（省�
 - https://github.com/ThinaticSystem/gomamayo.js
   - https://www.npmjs.com/package/gomamayo-js
 
-> [!WARNING]  
-> このパッケージは Apache License 2.0 の依存ライブラリ（[kuromoji.js](https://www.npmjs.com/package/kuromoji) および [kuromoji-ipadic-neologd](https://www.npmjs.com/package/kuromoji-neologd)）を使用しています。このパッケージ自体は MIT License ですが、これらの依存関係のライセンス条項も適用されます。
+> [!WARNING]
+> このパッケージ自体は MIT License ですが、Apache License 2.0 の依存リソース（[kuromoji.js](https://www.npmjs.com/package/kuromoji) の IPADIC 辞書、および [SudachiDict](https://github.com/WorksApplications/SudachiDict) 由来の読み表データ）を使用しています。これらのライセンス条項も適用されます。
