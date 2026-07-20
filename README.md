@@ -147,7 +147,7 @@ npx gomamayo ごまマヨネーズ --dict false  # 読み辞書なし（省メ�
 - 分かち書き・基本語彙の読み: [kuromoji.js](https://www.npmjs.com/package/kuromoji) 同梱の IPADIC 辞書
 - 固有名詞の読み: [SudachiDict](https://github.com/WorksApplications/SudachiDict) の語彙表から生成した読み表 (`dict/readings.tsv.gz`、約138万語)
 
-読み表は `npm run build:dict` で再生成できます。SudachiDict の新バージョンへの追従は GitHub Actions (`update-dict`) が毎月自動で行います。
+読み表 (`dict/readings.tsv.gz`) はリポジトリにはコミットされておらず、`npm run build:dict` で SudachiDict (AWS S3) から生成します。CI ではバージョンごとにキャッシュし、キャッシュがない場合のみ生成するため、失敗時(AWS障害など)はそこでジョブが止まります。npm に公開されるパッケージにはビルド済みのものが同梱されます。
 
 ## 貢献
 

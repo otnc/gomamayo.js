@@ -28,6 +28,25 @@ jobs:
       - run: npm ci
       - run: npm run format:check
       - run: npm run typecheck
+
+      - name: Resolve SudachiDict version
+        id: sudachi
+        run: |
+          VERSION="${SUDACHIDICT_VERSION:-$(grep -oP '(?<=DEFAULT_VERSION = ")[^"]+' scripts/build-dict.js)}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache dictionary
+        id: dict-cache
+        uses: actions/cache@v4
+        with:
+          path: dict
+          key: sudachidict-${{ steps.sudachi.outputs.version }}
+
+      # 失敗時 (AWS S3 障害など) はここでジョブが止まり、以降のバージョンbump・publishには進まない
+      - name: Build dictionary
+        if: steps.dict-cache.outputs.cache-hit != 'true'
+        run: npm run build:dict
+
       - run: npm test
       - run: npm run build
 
@@ -59,7 +78,14 @@ jobs:
       - run: npm install -g npm@11
 
       - name: Publish to npm
-        run: npm publish --access public --provenance --tag "${{ steps.bump.outputs.tag }}"
+        run: |
+          PKG="$(node -p "require('./package.json').name")"
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "$PKG@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice::$PKG@$VERSION is already published; skipping npm publish."
+          else
+            npm publish --access public --provenance --tag "${{ steps.bump.outputs.tag }}"
+          fi
 
       - name: Commit, tag and push
         run: |
@@ -77,11 +103,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          TAG="${{ steps.bump.outputs.version }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists; skipping."
+            exit 0
+          fi
           EXTRA_ARGS=""
           if [ "${{ steps.bump.outputs.tag }}" = "dev" ]; then
             EXTRA_ARGS="--prerelease"
           fi
-          gh release create "${{ steps.bump.outputs.version }}" dict/readings.tsv.gz \
-            --title "${{ steps.bump.outputs.version }}" \
+          gh release create "$TAG" dict/readings.tsv.gz \
+            --title "$TAG" \
             --generate-notes \
             $EXTRA_ARGS

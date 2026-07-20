@@ -3,6 +3,9 @@ node_modules/
 lib/
 dict.zip
 
+# Generated (via `npm run build:dict`, not committed - see CONTRIBUTING.md)
+dict/
+
 # Private
 .idea/
 .private/
