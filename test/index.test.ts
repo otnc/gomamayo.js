@@ -51,6 +51,22 @@ describe("analyze", () => {
     expect(result.degree).toBe(2);
   });
 
+  test("葉山舞鈴 is 1項1次ゴママヨ（proper noun）", async () => {
+    const result = await analyze("葉山舞鈴");
+    expect(result.isGomamayo).toBe(true);
+    expect(result.ary).toBe(1);
+    expect(result.degree).toBe(1);
+  });
+
+  test("サイレンススズカ is 1項1次ゴママヨ (proper noun for single token)", async () => {
+    const result = await analyze("サイレンススズカ", {
+      userDict: { サイレンススズカ: "さいれんすすずか" },
+    });
+    expect(result.isGomamayo).toBe(true);
+    expect(result.ary).toBe(1);
+    expect(result.degree).toBe(1);
+  });
+
   test("higher option controls high-order detection", async () => {
     const withHigher = await analyze("部分分数", { higher: true });
     const withoutHigher = await analyze("部分分数", { higher: false });

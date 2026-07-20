@@ -275,15 +275,26 @@ function applyReadingDict(
     }
     if (merged) continue;
 
+    // 辞書由来の読みは単一トークンでも内部ゴママヨ判定の対象にする
     const token = tokens[i]!;
-    let reading = override?.lookup(token.surface_form) ?? token.reading;
-    if (!reading) {
-      reading = dict.lookup(token.surface_form) ?? token.surface_form;
+    const overrideReading = override?.lookup(token.surface_form);
+    let reading: string;
+    let fromDict: boolean;
+    if (overrideReading) {
+      reading = overrideReading;
+      fromDict = true;
+    } else if (token.reading) {
+      reading = token.reading;
+      fromDict = false;
+    } else {
+      const dictReading = dict.lookup(token.surface_form);
+      reading = dictReading ?? token.surface_form;
+      fromDict = dictReading !== null;
     }
     infos.push({
       surface: token.surface_form,
       reading: hiraToKata(reading),
-      merged: false,
+      merged: fromDict,
     });
     i++;
   }
